@@ -1,0 +1,965 @@
+<script>
+/* ==========================================================================
+ * Client.html — dashboard behaviour
+ * Runs inside the Apps Script web-app iframe. All heavy lifting happens on
+ * the server (google.script.run); this file only renders and collects input.
+ * ========================================================================== */
+(function () {
+  'use strict';
+
+  var state = {
+    view: 'dashboard',
+    range: 'last30',
+    dark: false,
+    dash: null,
+    upiView: 'incoming',
+    distView: 'received',
+    txQuery: { page: 1, pageSize: 25, sortBy: 'date', sortDir: 'desc' },
+    dailyFilter: '',
+    settings: null,
+    chartsLoaded: false,
+    pendingCharts: false
+  };
+
+  var RANGES = [
+    { key: 'today', label: 'Today' },
+    { key: 'yesterday', label: 'Yesterday' },
+    { key: 'last7', label: 'Last 7 days' },
+    { key: 'last30', label: 'Last 30 days' },
+    { key: 'month', label: 'This month' },
+    { key: 'year', label: 'This year' },
+    { key: 'all', label: 'All time' }
+  ];
+
+  var CATEGORIES = ['Food & Dining', 'Shopping', 'Travel', 'Bills & Utilities', 'Transfer', 'Business', 'Other'];
+
+  /* ------------------------------------------------------------ utilities */
+
+  function $(id) { return document.getElementById(id); }
+
+  function esc(v) {
+    return String(v === null || v === undefined ? '' : v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  var inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  function fmt(n) { return inr.format(Number(n) || 0); }
+  function num(n) { return new Intl.NumberFormat('en-IN').format(Number(n) || 0); }
+
+  function toast(msg, kind) {
+    var el = $('toast');
+    el.className = 'fixed bottom-5 right-5 z-50 max-w-sm px-4 py-3 rounded-xl shadow-lg text-sm ' + (kind || 'info');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+    clearTimeout(el._t);
+    el._t = setTimeout(function () { el.classList.add('hidden'); }, 4200);
+  }
+
+  function run(fnName, args, onOk, onErr) {
+    var chain = google.script.run
+      .withSuccessHandler(function (res) { if (onOk) onOk(res); })
+      .withFailureHandler(function (err) {
+        var msg = err && err.message ? err.message : String(err);
+        toast(msg, 'err');
+        if (onErr) onErr(err);
+      });
+    var list = args || [];
+    chain[fnName].apply(chain, list);
+  }
+
+  function debounce(fn, ms) {
+    var t;
+    return function () {
+      var a = arguments, self = this;
+      clearTimeout(t);
+      t = setTimeout(function () { fn.apply(self, a); }, ms || 250);
+    };
+  }
+
+  function statusBadge(status) {
+    var cls = status === 'Successful' ? 'badge-green'
+      : status === 'Failed' ? 'badge-red'
+      : status === 'Pending' ? 'badge-amber'
+      : status === 'Reversed' ? 'badge-orange' : 'badge-gray';
+    return '<span class="badge ' + cls + '">' + esc(status || 'Unknown') + '</span>';
+  }
+
+  function typeBadge(type, amount) {
+    if (type === 'Money Received') return '<span class="amount-in">+' + fmt(amount) + '</span>';
+    if (type === 'Money Sent') return '<span class="amount-out">−' + fmt(amount) + '</span>';
+    return '<span class="badge badge-gray">' + fmt(amount) + '</span>';
+  }
+
+  /* --------------------------------------------------------------- init */
+
+  document.addEventListener('DOMContentLoaded', function () {
+    buildRangePills();
+    bindNav();
+    bindSegToggles();
+    bindTransactions();
+    bindDaily();
+    bindImport();
+    bindReports();
+    bindSettings();
+    bindDark();
+
+    google.charts.load('current', { packages: ['corechart'] });
+    google.charts.setOnLoadCallback(function () {
+      state.chartsLoaded = true;
+      loadDashboard();
+    });
+
+    loadSettings(true);
+
+    window.addEventListener('resize', debounce(function () {
+      if (state.dash && state.view === 'dashboard') renderCharts();
+    }, 250));
+  });
+
+  /* ---------------------------------------------------------- navigation */
+
+  var VIEW_TITLES = {
+    dashboard: 'Dashboard',
+    transactions: 'All Transactions',
+    daily: 'Daily History',
+    overall: 'Overall History',
+    import: 'Import Statements',
+    reports: 'Reports',
+    settings: 'Settings'
+  };
+
+  function bindNav() {
+    document.querySelectorAll('[data-nav]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        switchView(btn.getAttribute('data-nav'));
+      });
+    });
+    $('menu-toggle').addEventListener('click', function () {
+      $('sidebar').classList.toggle('-translate-x-full');
+      $('sidebar-backdrop').classList.toggle('hidden');
+    });
+    $('sidebar-backdrop').addEventListener('click', function () {
+      $('sidebar').classList.add('-translate-x-full');
+      $('sidebar-backdrop').classList.add('hidden');
+    });
+  }
+
+  function switchView(view) {
+    state.view = view;
+    document.querySelectorAll('.view').forEach(function (s) { s.classList.add('hidden'); });
+    var target = $('view-' + view);
+    if (target) target.classList.remove('hidden');
+    document.querySelectorAll('[data-nav]').forEach(function (b) {
+      b.classList.toggle('is-active', b.getAttribute('data-nav') === view);
+    });
+    $('view-title').textContent = VIEW_TITLES[view] || 'Dashboard';
+
+    if (view === 'dashboard' && !state.dash) loadDashboard();
+    if (view === 'transactions') loadTransactions();
+    if (view === 'daily') loadDaily();
+    if (view === 'overall') loadOverall();
+    if (view === 'reports') loadReconciliation();
+    if (view === 'settings') loadSettings(false);
+
+    if (window.innerWidth < 1024) {
+      $('sidebar').classList.add('-translate-x-full');
+      $('sidebar-backdrop').classList.add('hidden');
+    }
+  }
+
+  function buildRangePills() {
+    var wrap = $('range-pills');
+    wrap.innerHTML = '';
+    RANGES.forEach(function (r) {
+      var b = document.createElement('button');
+      b.className = 'range-pill' + (r.key === state.range ? ' is-active' : '');
+      b.textContent = r.label;
+      b.setAttribute('data-range', r.key);
+      b.addEventListener('click', function () {
+        state.range = r.key;
+        document.querySelectorAll('.range-pill').forEach(function (p) {
+          p.classList.toggle('is-active', p.getAttribute('data-range') === state.range);
+        });
+        loadDashboard();
+      });
+      wrap.appendChild(b);
+    });
+  }
+
+  function bindSegToggles() {
+    document.querySelectorAll('.seg').forEach(function (seg) {
+      seg.querySelectorAll('.seg-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          seg.querySelectorAll('.seg-btn').forEach(function (b) { b.classList.remove('is-active'); });
+          btn.classList.add('is-active');
+          var val = btn.getAttribute('data-val');
+          if (seg.getAttribute('data-seg') === 'upi') state.upiView = val;
+          if (seg.getAttribute('data-seg') === 'dailydist') state.distView = val;
+          if (state.dash) renderCharts();
+        });
+      });
+    });
+  }
+
+  /* ------------------------------------------------------------ dashboard */
+
+  function loadDashboard() {
+    run('getDashboardData', [state.range], function (data) {
+      state.dash = data;
+      renderSummary(data);
+      if (state.chartsLoaded) renderCharts(); else state.pendingCharts = true;
+      renderSyncPill(data.config.sync);
+      renderUpiChips(data.config.upiIds);
+      var anyData = data.summary.totalCount > 0;
+      $('demo-note').classList.toggle('hidden', anyData);
+    });
+  }
+
+  function renderSummary(data) {
+    var s = data.summary;
+    $('card-received').textContent = fmt(s.received);
+    $('card-sent').textContent = fmt(s.sent);
+    var netEl = $('card-net');
+    netEl.textContent = (s.net < 0 ? '−' : '') + fmt(Math.abs(s.net));
+    netEl.className = 'stat-value ' + (s.net >= 0 ? 'text-income' : 'text-expense');
+    $('card-count').textContent = num(s.successfulCount);
+    $('card-received-sub').textContent = num(s.incomingCount) + ' incoming payments';
+    $('card-sent-sub').textContent = num(s.outgoingCount) + ' outgoing payments';
+    $('card-net-sub').textContent = 'Received − Sent · ' + data.rangeLabel;
+    $('card-count-sub').textContent = 'of ' + num(s.totalCount) + ' total in period';
+  }
+
+  function renderUpiChips(upiIds) {
+    var wrap = $('upi-chips');
+    wrap.innerHTML = '';
+    (upiIds || []).forEach(function (u) {
+      var span = document.createElement('span');
+      span.className = 'text-[11px] px-2.5 py-1 rounded-full badge ' + (u.enabled ? 'badge-blue' : 'badge-gray');
+      span.textContent = u.id;
+      span.title = u.enabled ? 'Active for matching' : 'Disabled for matching';
+      wrap.appendChild(span);
+    });
+  }
+
+  function renderSyncPill(sync) {
+    sync = sync || {};
+    var dot = $('sync-dot'), text = $('sync-text');
+    var map = {
+      success: ['bg-green-500', sync.lastSync ? 'Synced ' + sync.lastSync : 'Synced'],
+      error: ['bg-red-500', 'Sync error'],
+      not_connected: ['bg-slate-400', 'Not connected']
+    };
+    var m = map[sync.lastStatus] || map.not_connected;
+    dot.className = 'w-2 h-2 rounded-full ' + m[0];
+    text.textContent = m[1];
+    $('last-sync').textContent = sync.lastSync
+      ? 'Last sync: ' + sync.lastSync + ' IST'
+      : 'No live bank connection — import statements or add manually';
+    $('sync-detail').textContent = sync.lastMessage || '';
+  }
+
+  /* --------------------------------------------------------------- charts */
+
+  var COLORS = ['#16a34a', '#dc2626', '#2563eb', '#f59e0b', '#8b5cf6', '#0891b2', '#64748b', '#ec4899'];
+
+  function chartText() { return state.dark ? '#e2e8f0' : '#334155'; }
+  function chartGrid() { return state.dark ? '#334155' : '#e2e8f0'; }
+
+  function baseOptions(title) {
+    return {
+      backgroundColor: 'transparent',
+      title: '',
+      titleTextStyle: { color: chartText(), fontSize: 13 },
+      legend: { position: 'bottom', textStyle: { color: chartText(), fontSize: 12 } },
+      chartArea: { left: 20, top: 16, width: '90%', height: '72%' },
+      colors: COLORS
+    };
+  }
+
+  function moneyFormat(dt, col) {
+    var f = new google.visualization.NumberFormat({ prefix: '₹', pattern: '#,##0.00' });
+    f.format(dt, col);
+  }
+
+  function chartEl(id) { return $(id); }
+
+  function showEmpty(id, message) {
+    var el = chartEl(id);
+    el.innerHTML = '<div class="chart-empty"><div class="text-2xl">📊</div><div>' +
+      esc(message || 'No data for the selected period') + '</div></div>';
+  }
+
+  function clearEmpty(id) {
+    var el = chartEl(id);
+    var empty = el.querySelector('.chart-empty');
+    if (empty) el.innerHTML = '';
+    return el;
+  }
+
+  function drawPie(id, rows, opts) {
+    var data = (rows || []).filter(function (r) { return (r.value || 0) > 0; });
+    if (!data.length) { showEmpty(id, opts && opts.empty); return; }
+    var el = clearEmpty(id);
+    var dt = new google.visualization.DataTable();
+    dt.addColumn('string', 'Label');
+    dt.addColumn('number', 'Amount');
+    dt.addRows(data.map(function (r) { return [r.name, Number(r.value) || 0]; }));
+    moneyFormat(dt, 1);
+    var options = baseOptions();
+    options.pieHole = 0.45;
+    options.pieSliceText = (opts && opts.sliceText) || 'percentage';
+    options.pieSliceTextStyle = { color: '#fff', fontSize: 11 };
+    options.tooltip = { text: 'value', textStyle: { color: chartText() } };
+    options.legend = { position: 'right', textStyle: { color: chartText(), fontSize: 12 } };
+    options.chartArea = { left: 10, top: 10, width: '62%', height: '88%' };
+    if (opts && opts.colors) options.colors = opts.colors;
+    new google.visualization.PieChart(el).draw(dt, options);
+  }
+
+  function drawBars(id, labels, series, opts) {
+    if (!labels || !labels.length) { showEmpty(id, opts && opts.empty); return; }
+    var el = clearEmpty(id);
+    var dt = new google.visualization.DataTable();
+    dt.addColumn('string', 'Period');
+    series.forEach(function (s) { dt.addColumn('number', s.name); });
+    dt.addRows(labels.map(function (label, i) {
+      return [label].concat(series.map(function (s) { return Number(s.values[i]) || 0; }));
+    }));
+    for (var c = 1; c <= series.length; c++) moneyFormat(dt, c);
+    var options = baseOptions();
+    options.legend = { position: 'bottom', textStyle: { color: chartText(), fontSize: 12 } };
+    options.colors = opts && opts.colors ? opts.colors : ['#16a34a', '#dc2626'];
+    options.bar = { groupWidth: '62%' };
+    options.hAxis = { textStyle: { color: chartText(), fontSize: 11 }, gridlines: { color: 'transparent' } };
+    options.vAxis = { textStyle: { color: chartText(), fontSize: 11 }, gridlines: { color: chartGrid() }, minValue: 0 };
+    options.chartArea = { left: 80, top: 16, width: '86%', height: '68%' };
+    new google.visualization.ColumnChart(el).draw(dt, options);
+  }
+
+  function drawLine(id, labels, values, opts) {
+    if (!labels || !labels.length) { showEmpty(id, opts && opts.empty); return; }
+    var el = clearEmpty(id);
+    var dt = new google.visualization.DataTable();
+    dt.addColumn('string', 'Date');
+    dt.addColumn('number', 'Cumulative Net');
+    dt.addRows(labels.map(function (l, i) { return [l, Number(values[i]) || 0]; }));
+    moneyFormat(dt, 1);
+    var options = baseOptions();
+    options.colors = ['#2563eb'];
+    options.curveType = 'function';
+    options.pointSize = 4;
+    options.legend = { position: 'none' };
+    options.hAxis = { textStyle: { color: chartText(), fontSize: 11 } };
+    options.vAxis = { textStyle: { color: chartText(), fontSize: 11 }, gridlines: { color: chartGrid() } };
+    options.chartArea = { left: 80, top: 16, width: '86%', height: '72%' };
+    new google.visualization.LineChart(el).draw(dt, options);
+  }
+
+  function renderCharts() {
+    var d = state.dash;
+    if (!d) return;
+
+    drawPie('chart-received-sent', d.receivedVsSent, {
+      sliceText: 'percentage',
+      colors: ['#16a34a', '#dc2626'],
+      empty: 'No successful payments in this period'
+    });
+
+    var upiRows = state.upiView === 'incoming' ? d.byUpiIncoming : d.byUpiOutgoing;
+    drawPie('chart-upi', upiRows, {
+      colors: state.upiView === 'incoming' ? ['#16a34a', '#22c55e', '#4ade80', '#86efac'] : ['#dc2626', '#ef4444', '#f87171', '#fca5a5'],
+      empty: 'No successful ' + state.upiView + ' payments in this period'
+    });
+
+    drawPie('chart-categories', d.categories, {
+      colors: ['#2563eb', '#f59e0b', '#8b5cf6', '#0891b2', '#ec4899', '#22c55e', '#64748b'],
+      empty: 'No outgoing payments in this period'
+    });
+
+    var distRows = (d.dailyDistribution || []).map(function (row) {
+      return { name: row.label, value: state.distView === 'received' ? row.received : row.sent };
+    });
+    drawPie('chart-daily-dist', distRows, {
+      colors: ['#0ea5e9', '#22d3ee', '#38bdf8', '#7dd3fc', '#0284c7', '#0369a1', '#075985'],
+      empty: 'No ' + state.distView + ' payments in this period'
+    });
+
+    var ds = d.dailySeries || [];
+    drawBars('chart-daily-bar', ds.map(function (x) { return x.label; }), [
+      { name: 'Received', values: ds.map(function (x) { return x.received; }) },
+      { name: 'Sent', values: ds.map(function (x) { return x.sent; }) }
+    ], { empty: 'No transactions in this period' });
+
+    var mo = d.monthly || [];
+    drawBars('chart-monthly', mo.map(function (x) { return x.month; }), [
+      { name: 'Received', values: mo.map(function (x) { return x.received; }) },
+      { name: 'Sent', values: mo.map(function (x) { return x.sent; }) }
+    ], { empty: 'No monthly data yet' });
+
+    var yr = d.yearly || [];
+    drawBars('chart-yearly', yr.map(function (x) { return x.year; }), [
+      { name: 'Received', values: yr.map(function (x) { return x.received; }) },
+      { name: 'Sent', values: yr.map(function (x) { return x.sent; }) }
+    ], { empty: 'No yearly data yet' });
+
+    drawPie('chart-status', (d.statusCounts || []).map(function (s) {
+      return { name: s.name, value: s.count };
+    }), {
+      colors: ['#16a34a', '#f59e0b', '#dc2626', '#f97316', '#64748b'],
+      empty: 'No transactions in this period'
+    });
+
+    var rn = d.runningNet || [];
+    drawLine('chart-running', rn.map(function (x) { return x.label; }),
+      rn.map(function (x) { return x.value; }), { empty: 'No data in this period' });
+  }
+
+  /* --------------------------------------------------------- transactions */
+
+  function bindTransactions() {
+    $('f-apply').addEventListener('click', function () { state.txQuery.page = 1; loadTransactions(); });
+    $('f-clear').addEventListener('click', function () {
+      ['f-search', 'f-upi', 'f-type', 'f-status', 'f-category', 'f-from', 'f-to'].forEach(function (id) { $(id).value = ''; });
+      state.txQuery = { page: 1, pageSize: 25, sortBy: 'date', sortDir: 'desc' };
+      loadTransactions();
+    });
+    $('f-search').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { state.txQuery.page = 1; loadTransactions(); }
+    });
+    $('f-export').addEventListener('click', function () { exportFile('transactions'); });
+    $('page-prev').addEventListener('click', function () {
+      if (state.txQuery.page > 1) { state.txQuery.page--; loadTransactions(); }
+    });
+    $('page-next').addEventListener('click', function () {
+      state.txQuery.page++; loadTransactions();
+    });
+    document.querySelectorAll('#view-transactions th[data-sort]').forEach(function (th) {
+      th.addEventListener('click', function () {
+        var key = th.getAttribute('data-sort');
+        if (state.txQuery.sortBy === key) {
+          state.txQuery.sortDir = state.txQuery.sortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+          state.txQuery.sortBy = key;
+          state.txQuery.sortDir = 'desc';
+        }
+        loadTransactions();
+      });
+    });
+  }
+
+  function txFilters() {
+    return {
+      search: $('f-search').value,
+      upiId: $('f-upi').value,
+      type: $('f-type').value,
+      status: $('f-status').value,
+      category: $('f-category').value,
+      dateFrom: $('f-from').value,
+      dateTo: $('f-to').value
+    };
+  }
+
+  function loadTransactions() {
+    var q = Object.assign({}, state.txQuery, txFilters());
+    $('txn-body').innerHTML = '<tr><td colspan="11" class="text-center py-6 text-slate-400">Loading…</td></tr>';
+    run('listTransactions', [q], function (res) {
+      renderTransactions(res);
+    });
+  }
+
+  function renderTransactions(res) {
+    state.txQuery.page = res.page;
+    var body = $('txn-body');
+    if (!res.rows.length) {
+      body.innerHTML = '<tr><td colspan="11" class="text-center py-8 text-slate-400">No transactions match your filters.</td></tr>';
+    } else {
+      body.innerHTML = res.rows.map(function (t) {
+        return '<tr>' +
+          '<td>' + esc(t.date) + '</td>' +
+          '<td>' + esc((t.time || '').slice(0, 5)) + '</td>' +
+          '<td title="' + esc(t.counterpartyUpi || '') + '">' + esc(t.counterparty || '—') + '</td>' +
+          '<td class="text-xs">' + esc(t.upiId || '—') + '</td>' +
+          '<td class="text-xs">' + esc(t.type) + '</td>' +
+          '<td class="text-xs">' + esc(t.category) + '</td>' +
+          '<td class="text-right">' + typeBadge(t.type, t.amount) + '</td>' +
+          '<td>' + statusBadge(t.status) + '</td>' +
+          '<td class="text-xs" title="' + esc(t.utr || '') + '">' + esc(t.utr || '—') + '</td>' +
+          '<td class="text-xs">' + esc(t.source || '') + '</td>' +
+          '<td><button class="text-xs underline text-expense" data-reverse="' + esc(t.key) + '">Reverse</button></td>' +
+          '</tr>';
+      }).join('');
+      body.querySelectorAll('[data-reverse]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var key = btn.getAttribute('data-reverse');
+          var reason = window.prompt('Reason for reversing this transaction (refund / chargeback / correction):', '');
+          if (reason === null) return;
+          run('reverseTransaction', [key, reason], function () {
+            toast('Transaction marked as reversed. Original record preserved.', 'ok');
+            loadTransactions();
+            loadDashboard();
+          });
+        });
+      });
+    }
+    $('txn-meta').textContent = num(res.total) + ' transaction(s)';
+    $('page-info').textContent = 'Page ' + res.page + ' of ' + res.pages;
+    $('page-prev').disabled = res.page <= 1;
+    $('page-next').disabled = res.page >= res.pages;
+    $('page-next').dataset.pages = res.pages;
+  }
+
+  /* ---------------------------------------------------------------- daily */
+
+  function bindDaily() {
+    $('daily-date').addEventListener('change', function () {
+      state.dailyFilter = $('daily-date').value;
+      loadDaily();
+    });
+    $('daily-all').addEventListener('click', function () {
+      state.dailyFilter = '';
+      $('daily-date').value = '';
+      loadDaily();
+    });
+  }
+
+  function loadDaily() {
+    $('daily-body').innerHTML = '<tr><td colspan="8" class="text-center py-6 text-slate-400">Loading…</td></tr>';
+    run('getDailyHistory', [state.dailyFilter || ''], function (res) {
+      var body = $('daily-body');
+      if (!res.rows.length) {
+        body.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-slate-400">No daily data yet.</td></tr>';
+        return;
+      }
+      body.innerHTML = res.rows.map(function (d) {
+        var netCls = d.net >= 0 ? 'amount-in' : 'amount-out';
+        return '<tr>' +
+          '<td>' + esc(d.date) + '</td>' +
+          '<td class="text-right amount-in">' + fmt(d.received) + '</td>' +
+          '<td class="text-right amount-out">' + fmt(d.sent) + '</td>' +
+          '<td class="text-right">' + fmt(d.refunds) + '</td>' +
+          '<td class="text-right ' + netCls + '">' + fmt(d.net) + '</td>' +
+          '<td class="text-right">' + num(d.incomingCount) + '</td>' +
+          '<td class="text-right">' + num(d.outgoingCount) + '</td>' +
+          '<td class="text-right">' + num(d.totalCount) + '</td>' +
+          '</tr>';
+      }).join('');
+    });
+  }
+
+  /* --------------------------------------------------------------- overall */
+
+  function loadOverall() {
+    run('getOverallData', [], function (res) {
+      var s = res.stats;
+      var cards = [
+        ['Total Received', fmt(s.received), 'text-income', s.incomingCount + ' incoming'],
+        ['Total Sent', fmt(s.sent), 'text-expense', s.outgoingCount + ' outgoing'],
+        ['Net Payment Flow', (s.net < 0 ? '−' : '') + fmt(Math.abs(s.net)), s.net >= 0 ? 'text-income' : 'text-expense', 'Lifetime'],
+        ['Refunds & Reversals', fmt(s.refunds), 'text-info', 'Excluded from totals'],
+        ['Average Incoming', fmt(s.avgIncoming), 'text-income', 'Per successful payment'],
+        ['Average Outgoing', fmt(s.avgOutgoing), 'text-expense', 'Per successful payment'],
+        ['Highest Incoming', fmt(s.maxIncoming), 'text-income', 'Single payment'],
+        ['Highest Outgoing', fmt(s.maxOutgoing), 'text-expense', 'Single payment']
+      ];
+      $('overall-cards').innerHTML = cards.map(function (c) {
+        return '<div class="card stat-card"><div class="stat-label">' + c[0] + '</div>' +
+          '<div class="stat-value ' + c[2] + '">' + c[1] + '</div>' +
+          '<div class="stat-sub">' + c[3] + '</div></div>';
+      }).join('');
+
+      $('overall-monthly').innerHTML = (s.monthly.length ? s.monthly : []).map(function (m) {
+        return '<tr><td>' + esc(m.month) + '</td><td class="text-right amount-in">' + fmt(m.received) +
+          '</td><td class="text-right amount-out">' + fmt(m.sent) + '</td><td class="text-right">' + fmt(m.net) +
+          '</td><td class="text-right">' + num(m.count) + '</td></tr>';
+      }).join('') || '<tr><td colspan="5" class="text-center py-6 text-slate-400">No data yet.</td></tr>';
+
+      $('overall-yearly').innerHTML = (s.yearly.length ? s.yearly : []).map(function (y) {
+        return '<tr><td>' + esc(y.year) + '</td><td class="text-right amount-in">' + fmt(y.received) +
+          '</td><td class="text-right amount-out">' + fmt(y.sent) + '</td><td class="text-right">' + fmt(y.net) +
+          '</td><td class="text-right">' + num(y.count) + '</td></tr>';
+      }).join('') || '<tr><td colspan="5" class="text-center py-6 text-slate-400">No data yet.</td></tr>';
+
+      $('overall-upi').innerHTML = s.byUpi.map(function (u) {
+        return '<tr><td>' + esc(u.id) + '</td><td>' + (u.enabled ? '<span class="badge badge-green">Yes</span>' : '<span class="badge badge-gray">No</span>') +
+          '</td><td class="text-right">' + num(u.incomingCount) + '</td><td class="text-right amount-in">' + fmt(u.incomingTotal) +
+          '</td><td class="text-right">' + num(u.outgoingCount) + '</td><td class="text-right amount-out">' + fmt(u.outgoingTotal) + '</td></tr>';
+      }).join('') || '<tr><td colspan="6" class="text-center py-6 text-slate-400">No data yet.</td></tr>';
+    });
+  }
+
+  /* ---------------------------------------------------------------- import */
+
+  function bindImport() {
+    var dz = $('dropzone');
+    var input = $('file-input');
+
+    dz.addEventListener('click', function () { input.click(); });
+    input.addEventListener('change', function () {
+      if (input.files && input.files[0]) readAndImport(input.files[0]);
+      input.value = '';
+    });
+    ['dragenter', 'dragover'].forEach(function (ev) {
+      dz.addEventListener(ev, function (e) { e.preventDefault(); dz.classList.add('is-over'); });
+    });
+    ['dragleave', 'drop'].forEach(function (ev) {
+      dz.addEventListener(ev, function (e) { e.preventDefault(); dz.classList.remove('is-over'); });
+    });
+    dz.addEventListener('drop', function (e) {
+      var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) readAndImport(f);
+    });
+
+    $('paste-import').addEventListener('click', function () {
+      var text = $('paste-data').value;
+      if (!text.trim()) { toast('Paste some rows first.', 'err'); return; }
+      doImport('Pasted data', text, 'Pasted spreadsheet data');
+    });
+
+    $('manual-save').addEventListener('click', saveManual);
+    fillCategories($('m-category'));
+  }
+
+  function fillCategories(select, includeBlank) {
+    select.innerHTML = (includeBlank ? '<option value="">All</option>' : '') +
+      CATEGORIES.map(function (c) { return '<option>' + c + '</option>'; }).join('');
+  }
+
+  function readAndImport(file) {
+    if (file.size > 4 * 1024 * 1024) { toast('File is larger than 4 MB. Please split the statement.', 'err'); return; }
+    var reader = new FileReader();
+    reader.onload = function (e) { doImport(file.name, e.target.result, 'Statement: ' + file.name); };
+    reader.onerror = function () { toast('Could not read the file.', 'err'); };
+    reader.readAsText(file);
+  }
+
+  function doImport(name, content, sourceLabel) {
+    var box = $('import-result');
+    box.classList.remove('hidden');
+    box.innerHTML = '<div class="text-sm text-slate-500">Importing…</div>';
+    run('importTransactionsCsv', [name, content, sourceLabel], function (res) {
+      var html = '<div class="rounded-xl border border-slate-200 dark:border-slate-700 p-4">' +
+        '<div class="font-semibold mb-2">Import complete — ' + esc(res.source) + '</div>' +
+        '<div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">' +
+        resultStat('New transactions', res.created, 'text-income') +
+        resultStat('Updated', res.updated, 'text-info') +
+        resultStat('Duplicates skipped', res.skipped, 'text-slate-500') +
+        resultStat('Rows with errors', res.errors.length, res.errors.length ? 'text-expense' : 'text-slate-500') +
+        '</div>';
+      if (res.errors.length) {
+        html += '<div class="mt-3 text-xs max-h-40 overflow-y-auto"><div class="font-semibold mb-1">Skipped rows</div>' +
+          res.errors.slice(0, 50).map(function (er) {
+            return '<div class="text-slate-500">Row ' + er.row + ': ' + esc(er.error) + '</div>';
+          }).join('') + '</div>';
+      }
+      html += '</div>';
+      box.innerHTML = html;
+      toast('Imported ' + res.created + ' new, updated ' + res.updated + ', skipped ' + res.skipped + '.', 'ok');
+      state.dash = null;
+      loadSettings(true);
+      loadDashboard();
+    }, function () {
+      box.innerHTML = '<div class="rounded-xl border border-expense/40 text-expense p-4 text-sm">Import failed. See the message above.</div>';
+    });
+  }
+
+  function resultStat(label, value, cls) {
+    return '<div class="rounded-lg bg-slate-50 dark:bg-slate-800 px-3 py-2">' +
+      '<div class="text-xs text-slate-500">' + label + '</div>' +
+      '<div class="text-lg font-semibold ' + cls + '">' + num(value) + '</div></div>';
+  }
+
+  function saveManual() {
+    var fields = {
+      date: $('m-date').value,
+      time: $('m-time').value,
+      type: $('m-type').value,
+      amount: $('m-amount').value,
+      status: $('m-status').value,
+      category: $('m-category').value,
+      counterparty: $('m-party').value,
+      counterpartyUpi: $('m-party-upi').value,
+      upiId: $('m-upi').value,
+      utr: $('m-utr').value,
+      method: $('m-method').value,
+      notes: $('m-notes').value
+    };
+    var msg = $('manual-msg');
+    msg.textContent = 'Saving…';
+    msg.className = 'text-sm text-slate-500';
+    run('addManualTransaction', [fields], function () {
+      msg.textContent = 'Saved ✓';
+      msg.className = 'text-sm text-income font-medium';
+      toast('Manual transaction saved to the ledger.', 'ok');
+      ['m-amount', 'm-party', 'm-party-upi', 'm-utr', 'm-notes'].forEach(function (id) { $(id).value = ''; });
+      state.dash = null;
+      loadDashboard();
+    }, function () {
+      msg.textContent = 'Could not save — see the error message.';
+      msg.className = 'text-sm text-expense';
+    });
+  }
+
+  /* ---------------------------------------------------------------- reports */
+
+  function bindReports() {
+    document.querySelectorAll('[data-export]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        exportFile(btn.getAttribute('data-export'));
+      });
+    });
+    $('recon-refresh').addEventListener('click', loadReconciliation);
+  }
+
+  function exportFile(kind) {
+    if (kind === 'print') { printReport(); return; }
+
+    var fnMap = {
+      transactions: ['exportTransactionsCsv', [txFilters()]],
+      daily: ['exportDailyCsv', [state.range]],
+      monthly: ['exportMonthlyCsv', []],
+      reconciliation: ['exportReconciliationCsv', []]
+    };
+    var entry = fnMap[kind];
+    if (!entry) return;
+    toast('Preparing export…', 'info');
+    run(entry[0], entry[1], function (res) {
+      if (!res.content) { toast('Nothing to export.', 'err'); return; }
+      downloadCsv(res.filename, res.content);
+      toast('Exported ' + num(res.count) + ' row(s).', 'ok');
+    });
+  }
+
+  function downloadCsv(filename, content) {
+    var blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+  }
+
+  function loadReconciliation() {
+    $('recon-body').innerHTML = '<tr><td colspan="5" class="text-center py-6 text-slate-400">Checking…</td></tr>';
+    run('reconcileLedger', [], function (res) {
+      var body = $('recon-body');
+      if (!res.issues.length) {
+        body.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-income">No issues found across ' + num(res.transactionCount) + ' transactions 🎉</td></tr>';
+        return;
+      }
+      body.innerHTML = res.issues.map(function (i) {
+        var cls = i.type === 'missing-reference' ? 'badge-amber'
+          : i.type === 'duplicate-candidate' ? 'badge-blue'
+          : i.type === 'refund-reversal' ? 'badge-orange'
+          : i.type === 'amount-mismatch' ? 'badge-red' : 'badge-gray';
+        return '<tr><td><span class="badge ' + cls + '">' + esc(i.type) + '</span></td>' +
+          '<td>' + esc(i.date || '') + '</td><td class="text-right">' + fmt(i.amount) + '</td>' +
+          '<td>' + esc(i.counterparty || '—') + '</td><td class="text-xs">' + esc(i.message) + '</td></tr>';
+      }).join('');
+      toast(res.issueCount + ' reconciliation issue(s) found.', 'info');
+    });
+  }
+
+  function printReport() {
+    run('getPrintReport', [state.range], function (r) {
+      var area = $('print-area');
+      var s = r.summary;
+      var html = '';
+      html += '<h1>UPI Payment History — Report</h1>';
+      html += '<div>Period: ' + esc(r.rangeLabel) + ' &nbsp;·&nbsp; Generated: ' + esc(r.generatedAt) + ' IST</div>';
+      html += '<div>Registered UPI IDs: ' + r.upiIds.map(function (u) { return esc(u.id) + (u.enabled ? '' : ' (disabled)'); }).join(', ') + '</div>';
+      html += '<h2>Summary</h2>';
+      html += '<table><tr><th>Metric</th><th>Value</th></tr>' +
+        row('Total Received', fmt(s.received)) + row('Total Sent', fmt(s.sent)) +
+        row('Net Payment Flow', fmt(s.net)) + row('Refunds & Reversals', fmt(s.refunds)) +
+        row('Incoming Transactions', num(s.incomingCount)) + row('Outgoing Transactions', num(s.outgoingCount)) +
+        row('Successful Transactions', num(s.successfulCount)) + row('Total Transactions', num(s.totalCount)) + '</table>';
+      html += '<h2>Daily Breakdown</h2><table><tr><th>Date</th><th>Received</th><th>Sent</th><th>Refunds</th><th>Net</th><th>Txns</th></tr>';
+      r.daily.forEach(function (d) {
+        html += '<tr><td>' + esc(d.date) + '</td><td>' + fmt(d.received) + '</td><td>' + fmt(d.sent) +
+          '</td><td>' + fmt(d.refunds) + '</td><td>' + fmt(d.net) + '</td><td>' + num(d.totalCount) + '</td></tr>';
+      });
+      html += '</table>';
+      html += '<h2>Spending by Category</h2><table><tr><th>Category</th><th>Amount</th><th>Txns</th></tr>';
+      r.categories.forEach(function (c) {
+        html += '<tr><td>' + esc(c.name) + '</td><td>' + fmt(c.value) + '</td><td>' + num(c.count) + '</td></tr>';
+      });
+      html += '</table>';
+      html += '<p style="margin-top:16px;font-size:11px">Received/Sent include only successful transactions. Refunds and reversals are reported separately and never double-counted.</p>';
+      area.innerHTML = html;
+      window.print();
+    });
+  }
+
+  function row(k, v) { return '<tr><td>' + esc(k) + '</td><td>' + esc(v) + '</td></tr>'; }
+
+  /* --------------------------------------------------------------- settings */
+
+  function bindSettings() {
+    $('dark-toggle').addEventListener('click', function () {
+      setDark(!state.dark);
+      run('updateSettings', [{ darkMode: state.dark }], function () {});
+    });
+    $('upi-save').addEventListener('click', saveUpiSettings);
+    $('src-add').addEventListener('click', addSource);
+    $('sync-now').addEventListener('click', function () {
+      toast('Running sync…', 'info');
+      run('runSyncNow', [], function (res) {
+        toast(res.status === 'not_connected'
+          ? 'No authorized source connected — nothing to sync.'
+          : (res.ok ? 'Sync completed.' : 'Sync finished with errors.'), res.ok ? 'ok' : 'err');
+        loadSettings(true);
+      });
+    });
+    $('trigger-create').addEventListener('click', function () {
+      run('createDailySyncTrigger', [], function () { toast('6-hour sync trigger created.', 'ok'); });
+    });
+    $('trigger-remove').addEventListener('click', function () {
+      run('removeDailySyncTrigger', [], function () { toast('Sync trigger removed.', 'ok'); });
+    });
+    $('disconnect').addEventListener('click', function () {
+      if (!window.confirm('Disconnect all integrations and delete stored tokens?')) return;
+      run('disconnectIntegrations', [], function () {
+        toast('All integrations disconnected.', 'ok');
+        loadSettings(true);
+      });
+    });
+    $('reset-btn').addEventListener('click', function () {
+      var text = $('reset-confirm').value;
+      if (text.toUpperCase() !== 'RESET') { toast('Type RESET to confirm.', 'err'); return; }
+      if (!window.confirm('This permanently deletes every transaction. Continue?')) return;
+      run('resetDashboardData', [text], function () {
+        toast('Dashboard data cleared.', 'ok');
+        $('reset-confirm').value = '';
+        state.dash = null;
+        loadSettings(true);
+        loadDashboard();
+      });
+    });
+  }
+
+  function bindDark() {
+    var stored = null;
+    try { stored = window.localStorage.getItem('upi-dark'); } catch (e) {}
+    if (stored === '1') setDark(true);
+  }
+
+  function setDark(on) {
+    state.dark = on;
+    document.documentElement.classList.toggle('dark', on);
+    $('dark-toggle').textContent = on ? '☀️' : '🌙';
+    try { window.localStorage.setItem('upi-dark', on ? '1' : '0'); } catch (e) {}
+    if (state.dash && state.view === 'dashboard') renderCharts();
+  }
+
+  function loadSettings(quiet) {
+    run('getSettings', [], function (res) {
+      state.settings = res;
+      setDark(!!res.config.darkMode || state.dark);
+      renderUpiSettings(res.config.upiIds);
+      renderSources(res.sync);
+      renderSyncPill(res.sync);
+      renderSyncDetail(res);
+      loadAudit();
+      fillUpiSelects(res.config.upiIds);
+    });
+  }
+
+  function fillUpiSelects(upiIds) {
+    var opts = '<option value="">All UPI IDs</option>' + (upiIds || []).map(function (u) {
+      return '<option value="' + esc(u.id) + '">' + esc(u.id) + '</option>';
+    }).join('');
+    $('f-upi').innerHTML = opts;
+    $('m-upi').innerHTML = '<option value="">— none —</option>' + (upiIds || []).map(function (u) {
+      return '<option>' + esc(u.id) + '</option>';
+    }).join('');
+    $('f-category').innerHTML = '<option value="">All</option>' +
+      CATEGORIES.map(function (c) { return '<option>' + c + '</option>'; }).join('');
+  }
+
+  function renderUpiSettings(upiIds) {
+    $('upi-settings').innerHTML = (upiIds || []).map(function (u, i) {
+      return '<div class="flex items-center gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-700">' +
+        '<div class="flex-1"><div class="font-medium">' + esc(u.label) + '</div>' +
+        '<div class="text-xs text-slate-500">' + esc(u.id) + '</div></div>' +
+        '<label class="flex items-center gap-2 text-sm">' +
+        '<input type="checkbox" data-upi-index="' + i + '" ' + (u.enabled !== false ? 'checked' : '') + ' class="w-4 h-4">' +
+        'Enabled for matching</label></div>';
+    }).join('');
+  }
+
+  function saveUpiSettings() {
+    var boxes = document.querySelectorAll('#upi-settings [data-upi-index]');
+    var upiIds = [];
+    boxes.forEach(function (box) {
+      var i = parseInt(box.getAttribute('data-upi-index'), 10);
+      var base = state.settings.config.upiIds[i];
+      upiIds.push({ id: base.id, label: base.label, enabled: box.checked });
+    });
+    run('updateSettings', [{ upiIds: upiIds }], function (res) {
+      toast('UPI settings saved.', 'ok');
+      state.settings.config.upiIds = res.config.upiIds;
+      renderUpiChips(res.config.upiIds);
+      state.dash = null;
+      loadDashboard();
+    });
+  }
+
+  function renderSources(sync) {
+    var list = $('source-list');
+    if (!sync.sources || !sync.sources.length) {
+      list.innerHTML = '<div class="text-sm text-slate-500 dark:text-slate-400 py-2">No authorized source connected. ' +
+        'The app reports synchronization honestly instead of pretending to have bank access.</div>';
+      return;
+    }
+    list.innerHTML = sync.sources.map(function (s, i) {
+      return '<div class="flex items-center gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-700">' +
+        '<div class="flex-1"><div class="font-medium">' + esc(s.name) + '</div>' +
+        '<div class="text-xs text-slate-500">' + esc(s.url) + ' · ' + esc(s.method) + '</div></div>' +
+        '<span class="badge ' + (s.enabled ? 'badge-green' : 'badge-gray') + '">' + (s.enabled ? 'Enabled' : 'Disabled') + '</span>' +
+        '<button class="text-xs underline text-expense" data-remove-source="' + i + '">Remove</button>' +
+        '</div>';
+    }).join('');
+    list.querySelectorAll('[data-remove-source]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (!window.confirm('Remove this source and its stored token?')) return;
+        run('removeSyncSource', [parseInt(btn.getAttribute('data-remove-source'), 10)], function () {
+          toast('Source removed.', 'ok');
+          loadSettings(true);
+        });
+      });
+    });
+  }
+
+  function renderSyncDetail(res) {
+    $('sync-detail').innerHTML = (res.sync.lastMessage ? esc(res.sync.lastMessage) + '<br>' : '') +
+      (res.spreadsheetUrl ? 'Spreadsheet: <a class="underline text-info" target="_blank" href="' + esc(res.spreadsheetUrl) + '">Open UPI Payment History Dashboard</a>' : '');
+  }
+
+  function addSource() {
+    var name = $('src-name').value.trim();
+    var url = $('src-url').value.trim();
+    var token = $('src-token').value;
+    if (!/^https:\/\//i.test(url)) { toast('Source URL must start with https://', 'err'); return; }
+    run('addSyncSource', [{ name: name || 'Source', url: url, token: token, method: 'GET', enabled: true }], function () {
+      toast('Source added. Tokens are stored server-side only.', 'ok');
+      $('src-name').value = ''; $('src-url').value = ''; $('src-token').value = '';
+      loadSettings(true);
+    });
+  }
+
+  function loadAudit() {
+    run('getAuditLog', [100], function (res) {
+      $('audit-body').innerHTML = res.rows.map(function (r) {
+        return '<tr><td class="text-xs">' + esc(r.timestamp) + '</td><td class="text-xs">' + esc(r.user || '—') +
+          '</td><td class="text-xs"><span class="badge badge-blue">' + esc(r.action) + '</span></td>' +
+          '<td class="text-xs">' + esc(r.details) + '</td></tr>';
+      }).join('') || '<tr><td colspan="4" class="text-center py-6 text-slate-400">No audit entries yet.</td></tr>';
+    });
+  }
+
+})();
+</script>

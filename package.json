@@ -1,0 +1,12 @@
+{
+  "name": "upi-payment-history-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Automated UPI payment history, Google Sheets ledger, totals and interactive charts (Google Apps Script).",
+  "scripts": {
+    "test": "node --test tests/core.test.js tests/sample-import.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

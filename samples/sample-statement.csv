@@ -1,0 +1,13 @@
+Transaction Date,Transaction Time,Amount (₹),Type,Status,Name,Payer or Payee UPI ID,UTR,Your UPI ID
+01/10/2026,09:12,1200.00,Credit,Success,Ravi Kumar,ravi.kumar@okhdfc,UTR900001,9363610085@ptyes
+01/10/2026,13:40,349.00,Debit,Success,Swiggy,swiggy@axisbank,UTR900002,poovarasuzyra@okaxis
+02/10/2026,08:05,150.00,Debit,Success,Uber Ride,uber@paytm,UTR900003,poovarasuzyra@okaxis
+02/10/2026,19:22,499.00,Debit,Success,Amazon Pay,amazon@apl,UTR900004,poovarasuzyra@okaxis
+03/10/2026,10:00,2500.00,Credit,Success,Client Payment,vendor.acme@okicici,UTR900005,9363610085@ptyes
+03/10/2026,11:15,899.00,Debit,Pending,Myntra,myntra@axisbank,UTR900006,poovarasuzyra@okaxis
+04/10/2026,16:45,75.00,Debit,Failed,Metro Card,metro@paytm,UTR900007,poovarasuzyra@okaxis
+05/10/2026,12:30,300.00,Debit,Success,Swiggy,swiggy@axisbank,UTR900008,poovarasuzyra@okaxis
+05/10/2026,12:35,150.00,Debit,Success,Swiggy,swiggy@axisbank,UTR900009,poovarasuzyra@okaxis
+06/10/2026,20:10,600.00,Credit,Success,Refund Zomato,zomato@axisbank,UTR900010,9363610085@ptyes
+07/10/2026,07:50,220.00,Debit,Success,Jio Recharge,jio@axisbank,UTR900011,poovarasuzyra@okaxis
+07/10/2026,18:00,300.00,Debit,Reversed,Amazon Return,amazon@apl,UTR900012,poovarasuzyra@okaxis

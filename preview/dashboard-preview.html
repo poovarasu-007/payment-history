@@ -1,0 +1,1801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UPI Payment History Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            income: '#16a34a',
+            expense: '#dc2626',
+            info: '#2563eb'
+          }
+        }
+      }
+    };
+  </script>
+  <script src="https://www.gstatic.com/charts/loader.js"></script>
+  <style>
+  /* ---------------------------------------------------------------- Layout */
+  html { scroll-behavior: smooth; }
+  .view { animation: fade .18s ease-in; }
+  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  /* --------------------------------------------------------------- Sidebar */
+  .nav-btn {
+    display: flex; align-items: center; gap: .65rem; width: 100%;
+    padding: .6rem .85rem; border-radius: .6rem; font-size: .9rem;
+    color: #cbd5e1; transition: background .15s, color .15s; text-align: left;
+  }
+  .nav-btn:hover { background: rgba(255,255,255,.08); color: #fff; }
+  .nav-btn.is-active { background: #2563eb; color: #fff; font-weight: 600; }
+
+  /* ----------------------------------------------------------------- Cards */
+  .card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 1rem;
+    padding: 1.1rem 1.15rem; box-shadow: 0 1px 2px rgba(15,23,42,.04);
+  }
+  .dark .card { background: #1e293b; border-color: #334155; box-shadow: none; }
+  .card-title { font-weight: 600; font-size: .95rem; margin-bottom: .65rem; }
+
+  .stat-card { display: flex; flex-direction: column; gap: .2rem; }
+  .stat-label { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: #64748b; }
+  .dark .stat-label { color: #94a3b8; }
+  .stat-value { font-size: 1.5rem; font-weight: 700; line-height: 1.2; word-break: break-word; }
+  .stat-sub { font-size: .75rem; color: #64748b; }
+  .dark .stat-sub { color: #94a3b8; }
+
+  .text-income { color: #16a34a; }
+  .text-expense { color: #dc2626; }
+  .text-info { color: #2563eb; }
+
+  /* --------------------------------------------------------------- Buttons */
+  .btn { display: inline-flex; align-items: center; gap: .35rem; padding: .5rem .9rem;
+         border-radius: .6rem; font-size: .85rem; font-weight: 500; transition: .15s; cursor: pointer;
+         border: 1px solid transparent; }
+  .btn-primary { background: #2563eb; color: #fff; }
+  .btn-primary:hover { background: #1d4ed8; }
+  .btn-ghost { background: transparent; border-color: #cbd5e1; color: inherit; }
+  .btn-ghost:hover { background: #f1f5f9; }
+  .dark .btn-ghost { border-color: #475569; }
+  .dark .btn-ghost:hover { background: #334155; }
+  .btn-danger { background: #dc2626; color: #fff; }
+  .btn-danger:hover { background: #b91c1c; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* ------------------------------------------------------- Segmented toggle */
+  .seg { display: inline-flex; background: #f1f5f9; border-radius: .55rem; padding: 2px; }
+  .dark .seg { background: #0f172a; }
+  .seg-btn { padding: .3rem .7rem; font-size: .75rem; border-radius: .45rem; color: #475569; }
+  .dark .seg-btn { color: #94a3b8; }
+  .seg-btn.is-active { background: #fff; color: #1e293b; font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .dark .seg-btn.is-active { background: #334155; color: #fff; }
+
+  /* -------------------------------------------------------- Range pills */
+  .range-pill { padding: .3rem .75rem; font-size: .78rem; border-radius: 999px;
+                border: 1px solid #cbd5e1; color: #475569; cursor: pointer; background: transparent; }
+  .dark .range-pill { border-color: #475569; color: #cbd5e1; }
+  .range-pill.is-active { background: #2563eb; border-color: #2563eb; color: #fff; font-weight: 600; }
+  .dark .range-pill.is-active { background: #2563eb; border-color: #2563eb; color: #fff; }
+
+  /* ---------------------------------------------------------------- Fields */
+  .field { width: 100%; padding: .5rem .7rem; font-size: .85rem; border-radius: .6rem;
+           border: 1px solid #cbd5e1; background: #fff; color: inherit; }
+  .dark .field { background: #0f172a; border-color: #475569; color: #e2e8f0; }
+  .field:focus { outline: 2px solid #2563eb33; border-color: #2563eb; }
+  .field-label { display: block; font-size: .72rem; font-weight: 600; text-transform: uppercase;
+                 letter-spacing: .05em; color: #64748b; margin-bottom: .25rem; }
+  .dark .field-label { color: #94a3b8; }
+
+  /* ---------------------------------------------------------------- Charts */
+  .chart-box { position: relative; width: 100%; height: 300px; }
+  .chart-box.chart-tall { height: 340px; }
+  .chart-box .chart-empty { position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; text-align: center; gap: .3rem;
+      color: #94a3b8; font-size: .85rem; border: 1px dashed #cbd5e1; border-radius: .75rem; }
+  .dark .chart-box .chart-empty { border-color: #475569; }
+
+  /* ---------------------------------------------------------------- Tables */
+  .data-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+  .data-table th { text-align: left; padding: .65rem .75rem; background: #f8fafc; color: #475569;
+                   font-weight: 600; white-space: nowrap; border-bottom: 1px solid #e2e8f0; font-size: .74rem;
+                   text-transform: uppercase; letter-spacing: .04em; }
+  .data-table th[data-sort] { cursor: pointer; user-select: none; }
+  .data-table th[data-sort]:hover { color: #2563eb; }
+  .dark .data-table th { background: #0f172a; color: #94a3b8; border-color: #334155; }
+  .data-table td { padding: .6rem .75rem; border-bottom: 1px solid #f1f5f9; white-space: nowrap; }
+  .dark .data-table td { border-color: #334155; }
+  .data-table tbody tr:hover { background: #f8fafc; }
+  .dark .data-table tbody tr:hover { background: #0f172a; }
+
+  .badge { display: inline-flex; align-items: center; padding: .15rem .55rem; border-radius: 999px;
+           font-size: .7rem; font-weight: 600; white-space: nowrap; }
+  .badge-green  { background: #dcfce7; color: #15803d; }
+  .badge-red    { background: #fee2e2; color: #b91c1c; }
+  .badge-amber  { background: #fef3c7; color: #b45309; }
+  .badge-orange { background: #ffedd5; color: #c2410c; }
+  .badge-gray   { background: #e2e8f0; color: #475569; }
+  .badge-blue   { background: #dbeafe; color: #1d4ed8; }
+  .dark .badge-green  { background: #14532d; color: #bbf7d0; }
+  .dark .badge-red    { background: #7f1d1d; color: #fecaca; }
+  .dark .badge-amber  { background: #78350f; color: #fde68a; }
+  .dark .badge-orange { background: #7c2d12; color: #fed7aa; }
+  .dark .badge-gray   { background: #334155; color: #cbd5e1; }
+  .dark .badge-blue   { background: #1e3a8a; color: #bfdbfe; }
+
+  .amount-in  { color: #16a34a; font-weight: 600; }
+  .amount-out { color: #dc2626; font-weight: 600; }
+
+  /* --------------------------------------------------------------- Dropzone */
+  .dropzone { border: 2px dashed #cbd5e1; border-radius: .9rem; padding: 1.6rem; text-align: center;
+              transition: .15s; cursor: pointer; }
+  .dark .dropzone { border-color: #475569; }
+  .dropzone.is-over { border-color: #2563eb; background: #eff6ff44; }
+
+  /* ----------------------------------------------------------------- Toast */
+  #toast.ok   { background: #15803d; color: #fff; }
+  #toast.err  { background: #b91c1c; color: #fff; }
+  #toast.info { background: #1e293b; color: #fff; }
+
+  /* ----------------------------------------------------------- Print styles */
+  .print-only { display: none; }
+  @media print {
+    body * { visibility: hidden !important; }
+    #print-area, #print-area * { visibility: visible !important; }
+    #print-area { display: block !important; position: absolute; inset: 0; padding: 24px; background: #fff; color: #000; }
+    #print-area table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    #print-area th, #print-area td { border: 1px solid #999; padding: 4px 6px; text-align: left; }
+    #print-area h1 { font-size: 20px; margin-bottom: 4px; }
+    #print-area h2 { font-size: 15px; margin: 16px 0 6px; }
+  }
+
+  /* -------------------------------------------------------- Scrollbars */
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
+  .dark ::-webkit-scrollbar-thumb { background: #475569; }
+</style>
+
+</head>
+<body class="bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-100">
+<div style="background:#b45309;color:#fff;text-align:center;padding:8px 12px;font:600 13px system-ui">PREVIEW — sample data only. The real app is deployed to your own Google account. No PIN/OTP is ever used.</div>
+<div id="app" class="min-h-screen">
+
+  <!-- ============================ Sidebar ============================ -->
+  <aside id="sidebar"
+         class="fixed inset-y-0 left-0 z-40 w-64 bg-slate-900 text-slate-200 transform -translate-x-full lg:translate-x-0 transition-transform duration-200 flex flex-col">
+    <div class="px-5 py-5 border-b border-slate-700">
+      <div class="text-lg font-semibold tracking-tight">UPI Payment History</div>
+      <div class="text-xs text-slate-400 mt-1">Dashboard &amp; Analytics</div>
+    </div>
+    <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+      <button data-nav="dashboard" class="nav-btn">📊 <span>Dashboard</span></button>
+      <button data-nav="transactions" class="nav-btn">🧾 <span>All Transactions</span></button>
+      <button data-nav="daily" class="nav-btn">📅 <span>Daily History</span></button>
+      <button data-nav="overall" class="nav-btn">📈 <span>Overall History</span></button>
+      <button data-nav="import" class="nav-btn">⬇️ <span>Import Statements</span></button>
+      <button data-nav="reports" class="nav-btn">📑 <span>Reports</span></button>
+      <button data-nav="settings" class="nav-btn">⚙️ <span>Settings</span></button>
+    </nav>
+    <div class="px-5 py-4 border-t border-slate-700 text-[11px] text-slate-400 leading-relaxed">
+      <div class="font-semibold text-slate-300 mb-1">🔒 Security</div>
+      This app never asks for a UPI PIN, OTP or banking password. UPI IDs are used only to
+      match transactions from imported statements.
+    </div>
+  </aside>
+  <div id="sidebar-backdrop" class="fixed inset-0 bg-black/40 z-30 hidden lg:hidden"></div>
+
+  <!-- ============================= Main ============================== -->
+  <div class="lg:pl-64">
+    <header class="sticky top-0 z-20 bg-white/90 dark:bg-slate-800/90 backdrop-blur border-b border-slate-200 dark:border-slate-700">
+      <div class="px-4 sm:px-6 py-3 flex flex-wrap items-center gap-3">
+        <button id="menu-toggle" class="lg:hidden text-2xl leading-none px-2">☰</button>
+        <h1 id="view-title" class="text-lg font-semibold mr-auto">Dashboard</h1>
+
+        <div id="upi-chips" class="hidden md:flex items-center gap-2"></div>
+
+        <div id="sync-pill" class="flex items-center gap-2 text-xs px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-600">
+          <span id="sync-dot" class="w-2 h-2 rounded-full bg-slate-400"></span>
+          <span id="sync-text">Checking…</span>
+        </div>
+
+        <button id="dark-toggle" title="Toggle dark mode" class="px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-sm">🌙</button>
+      </div>
+
+      <!-- Range selector -->
+      <div class="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-2">
+        <span class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400 mr-1">Period</span>
+        <div id="range-pills" class="flex flex-wrap gap-1.5"></div>
+        <div id="last-sync" class="ml-auto text-[11px] text-slate-500 dark:text-slate-400"></div>
+      </div>
+    </header>
+
+    <main class="px-4 sm:px-6 py-6 space-y-6">
+
+      <!-- ======================= Dashboard view ======================= -->
+      <section id="view-dashboard" class="view space-y-6">
+        <div id="demo-note" class="hidden text-sm rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-900/30 dark:border-amber-700 px-4 py-3">
+          No transactions yet. Import a bank statement (CSV/Excel) or add one manually to see your charts.
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div class="card stat-card">
+            <div class="stat-label">Total Received</div>
+            <div id="card-received" class="stat-value text-income">₹0.00</div>
+            <div id="card-received-sub" class="stat-sub">0 incoming payments</div>
+          </div>
+          <div class="card stat-card">
+            <div class="stat-label">Total Sent</div>
+            <div id="card-sent" class="stat-value text-expense">₹0.00</div>
+            <div id="card-sent-sub" class="stat-sub">0 outgoing payments</div>
+          </div>
+          <div class="card stat-card">
+            <div class="stat-label">Net Payment Flow</div>
+            <div id="card-net" class="stat-value text-info">₹0.00</div>
+            <div id="card-net-sub" class="stat-sub">Received − Sent</div>
+          </div>
+          <div class="card stat-card">
+            <div class="stat-label">Successful Transactions</div>
+            <div id="card-count" class="stat-value">0</div>
+            <div id="card-count-sub" class="stat-sub">of 0 total in period</div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div class="card">
+            <h2 class="card-title">Money Received vs Money Sent</h2>
+            <div id="chart-received-sent" class="chart-box"></div>
+          </div>
+          <div class="card">
+            <div class="flex items-center justify-between mb-2">
+              <h2 class="card-title mb-0">Payment Distribution by UPI ID</h2>
+              <div class="seg" data-seg="upi">
+                <button data-val="incoming" class="seg-btn is-active">Incoming</button>
+                <button data-val="outgoing" class="seg-btn">Outgoing</button>
+              </div>
+            </div>
+            <div id="chart-upi" class="chart-box"></div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div class="card">
+            <h2 class="card-title">Payment Categories (money sent)</h2>
+            <div id="chart-categories" class="chart-box"></div>
+          </div>
+          <div class="card">
+            <div class="flex items-center justify-between mb-2">
+              <h2 class="card-title mb-0">Daily Payment Distribution</h2>
+              <div class="seg" data-seg="dailydist">
+                <button data-val="received" class="seg-btn is-active">Received</button>
+                <button data-val="sent" class="seg-btn">Sent</button>
+              </div>
+            </div>
+            <div id="chart-daily-dist" class="chart-box"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">Daily Income vs Expense</h2>
+          <div id="chart-daily-bar" class="chart-box chart-tall"></div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div class="card">
+            <h2 class="card-title">Monthly Income vs Expense</h2>
+            <div id="chart-monthly" class="chart-box"></div>
+          </div>
+          <div class="card">
+            <h2 class="card-title">Yearly Financial Overview</h2>
+            <div id="chart-yearly" class="chart-box"></div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div class="card">
+            <h2 class="card-title">Transaction Count by Status</h2>
+            <div id="chart-status" class="chart-box"></div>
+          </div>
+          <div class="card">
+            <h2 class="card-title">Running Net Payment Flow</h2>
+            <div id="chart-running" class="chart-box"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ====================== Transactions view ===================== -->
+      <section id="view-transactions" class="view hidden space-y-4">
+        <div class="card">
+          <div class="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3">
+            <div class="md:col-span-2">
+              <label class="field-label">Search</label>
+              <input id="f-search" type="text" class="field" placeholder="Payee, UTR, notes…">
+            </div>
+            <div>
+              <label class="field-label">UPI ID</label>
+              <select id="f-upi" class="field"></select>
+            </div>
+            <div>
+              <label class="field-label">Type</label>
+              <select id="f-type" class="field">
+                <option value="">All</option>
+                <option>Money Received</option>
+                <option>Money Sent</option>
+                <option>Unknown</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Status</label>
+              <select id="f-status" class="field">
+                <option value="">All</option>
+                <option>Successful</option>
+                <option>Pending</option>
+                <option>Failed</option>
+                <option>Reversed</option>
+                <option>Unknown</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Category</label>
+              <select id="f-category" class="field"></select>
+            </div>
+            <div>
+              <label class="field-label">From</label>
+              <input id="f-from" type="date" class="field">
+            </div>
+            <div>
+              <label class="field-label">To</label>
+              <input id="f-to" type="date" class="field">
+            </div>
+            <div class="flex items-end gap-2 md:col-span-2">
+              <button id="f-apply" class="btn btn-primary">Apply filters</button>
+              <button id="f-clear" class="btn btn-ghost">Clear</button>
+              <button id="f-export" class="btn btn-ghost">⬇ CSV</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card overflow-hidden p-0">
+          <div class="overflow-x-auto">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th data-sort="date">Date ⇅</th>
+                  <th data-sort="time">Time ⇅</th>
+                  <th data-sort="counterparty">Payer / Payee ⇅</th>
+                  <th data-sort="upiId">UPI ID ⇅</th>
+                  <th data-sort="type">Type ⇅</th>
+                  <th data-sort="category">Category ⇅</th>
+                  <th data-sort="amount" class="text-right">Amount ⇅</th>
+                  <th data-sort="status">Status ⇅</th>
+                  <th>Reference</th>
+                  <th>Source</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="txn-body"></tbody>
+            </table>
+          </div>
+          <div class="flex flex-wrap items-center gap-3 px-4 py-3 border-t border-slate-200 dark:border-slate-700">
+            <div id="txn-meta" class="text-sm text-slate-500 dark:text-slate-400"></div>
+            <div class="ml-auto flex items-center gap-2">
+              <button id="page-prev" class="btn btn-ghost">← Prev</button>
+              <span id="page-info" class="text-sm"></span>
+              <button id="page-next" class="btn btn-ghost">Next →</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================= Daily view ========================= -->
+      <section id="view-daily" class="view hidden space-y-4">
+        <div class="card flex flex-wrap items-end gap-3">
+          <div>
+            <label class="field-label">Jump to a date</label>
+            <input id="daily-date" type="date" class="field">
+          </div>
+          <button id="daily-all" class="btn btn-ghost">Show all days</button>
+          <div class="ml-auto text-xs text-slate-500 dark:text-slate-400">Daily totals are calculated from the ledger — failed, pending and reversed rows are handled per the rules below each table.</div>
+        </div>
+        <div class="card overflow-hidden p-0">
+          <div class="overflow-x-auto">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th class="text-right">Received</th>
+                  <th class="text-right">Sent</th>
+                  <th class="text-right">Refunds</th>
+                  <th class="text-right">Net Flow</th>
+                  <th class="text-right">Incoming</th>
+                  <th class="text-right">Outgoing</th>
+                  <th class="text-right">Total Txns</th>
+                </tr>
+              </thead>
+              <tbody id="daily-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <p class="text-xs text-slate-500 dark:text-slate-400">
+          Received/Sent include only <strong>Successful</strong> transactions. Refunds &amp; reversals are shown separately and excluded from Received/Sent to avoid double counting.
+          Net Payment Flow = Total Money Received − Total Money Sent.
+        </p>
+      </section>
+
+      <!-- ======================== Overall view ======================== -->
+      <section id="view-overall" class="view hidden space-y-6">
+        <div id="overall-cards" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4"></div>
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div class="card overflow-hidden p-0">
+            <h2 class="card-title px-4 pt-4">Monthly Totals</h2>
+            <div class="overflow-x-auto">
+              <table class="data-table">
+                <thead><tr><th>Month</th><th class="text-right">Received</th><th class="text-right">Sent</th><th class="text-right">Net</th><th class="text-right">Txns</th></tr></thead>
+                <tbody id="overall-monthly"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card overflow-hidden p-0">
+            <h2 class="card-title px-4 pt-4">Yearly Totals</h2>
+            <div class="overflow-x-auto">
+              <table class="data-table">
+                <thead><tr><th>Year</th><th class="text-right">Received</th><th class="text-right">Sent</th><th class="text-right">Net</th><th class="text-right">Txns</th></tr></thead>
+                <tbody id="overall-yearly"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="card overflow-hidden p-0">
+          <h2 class="card-title px-4 pt-4">Transactions by Registered UPI ID</h2>
+          <div class="overflow-x-auto">
+            <table class="data-table">
+              <thead><tr><th>UPI ID</th><th>Enabled</th><th class="text-right">Incoming</th><th class="text-right">Incoming Total</th><th class="text-right">Outgoing</th><th class="text-right">Outgoing Total</th></tr></thead>
+              <tbody id="overall-upi"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================= Import view ======================== -->
+      <section id="view-import" class="view hidden space-y-6">
+        <div class="card">
+          <h2 class="card-title">Import bank statement (CSV / Excel-exported / pasted data)</h2>
+          <p class="text-sm text-slate-500 dark:text-slate-400 mb-3">
+            A UPI ID alone cannot read your bank history. Export a statement (CSV) from your bank or UPI app,
+            or paste spreadsheet rows below. The importer auto-detects columns, matches your configured UPI IDs,
+            removes duplicates by UTR/reference and stores everything in <strong>All Transactions</strong>.
+          </p>
+          <div id="dropzone" class="dropzone">
+            <div class="text-3xl mb-1">📄</div>
+            <div class="font-medium">Drag &amp; drop a CSV file here</div>
+            <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">or <label class="underline cursor-pointer">browse<input id="file-input" type="file" accept=".csv,.txt,text/csv,text/plain" class="hidden"></label> · also accepts tab-separated data copied from Excel</div>
+          </div>
+          <div class="mt-4">
+            <label class="field-label">…or paste rows (including the header row)</label>
+            <textarea id="paste-data" rows="6" class="field font-mono text-xs" placeholder="Transaction Date,Amount (₹),Type,Status,Name,UTR&#10;11/10/2026,₹500.00,Debit,Success,Swiggy,UTR123"></textarea>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <button id="paste-import" class="btn btn-primary">Import pasted rows</button>
+              <span class="text-xs text-slate-500 dark:text-slate-400 self-center">Duplicates are skipped automatically.</span>
+            </div>
+          </div>
+          <div id="import-result" class="mt-4 hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">Manual transaction entry</h2>
+          <p class="text-sm text-slate-500 dark:text-slate-400 mb-3">
+            Use this only for corrections or sources you cannot export. Every manual entry is labelled
+            <em>Manual Entry</em> and recorded in the audit log.
+          </p>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div><label class="field-label">Date *</label><input id="m-date" type="date" class="field"></div>
+            <div><label class="field-label">Time</label><input id="m-time" type="time" class="field"></div>
+            <div><label class="field-label">Type *</label>
+              <select id="m-type" class="field">
+                <option>Money Received</option>
+                <option>Money Sent</option>
+              </select>
+            </div>
+            <div><label class="field-label">Amount (₹) *</label><input id="m-amount" type="number" step="0.01" min="0" class="field" placeholder="0.00"></div>
+            <div><label class="field-label">Status</label>
+              <select id="m-status" class="field">
+                <option>Successful</option>
+                <option>Pending</option>
+                <option>Failed</option>
+                <option>Reversed</option>
+              </select>
+            </div>
+            <div><label class="field-label">Category</label><select id="m-category" class="field"></select></div>
+            <div><label class="field-label">Payer / Payee name</label><input id="m-party" type="text" class="field"></div>
+            <div><label class="field-label">Payer / Payee UPI ID</label><input id="m-party-upi" type="text" class="field" placeholder="name@bank"></div>
+            <div><label class="field-label">Your UPI ID</label><select id="m-upi" class="field"></select></div>
+            <div><label class="field-label">UTR / Reference</label><input id="m-utr" type="text" class="field"></div>
+            <div><label class="field-label">Payment method</label><input id="m-method" type="text" class="field" placeholder="UPI"></div>
+            <div><label class="field-label">Notes</label><input id="m-notes" type="text" class="field"></div>
+          </div>
+          <div class="mt-3 flex items-center gap-3">
+            <button id="manual-save" class="btn btn-primary">Save transaction</button>
+            <span id="manual-msg" class="text-sm"></span>
+          </div>
+          <p class="mt-3 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 rounded-lg px-3 py-2">
+            🔒 Never enter a UPI PIN, OTP or banking password anywhere in this app. It will never be requested.
+          </p>
+        </div>
+      </section>
+
+      <!-- ======================== Reports view ======================== -->
+      <section id="view-reports" class="view hidden space-y-6">
+        <div class="card">
+          <h2 class="card-title">Export &amp; reports</h2>
+          <div class="flex flex-wrap gap-2">
+            <button class="btn btn-primary" data-export="transactions">⬇ Transactions (CSV)</button>
+            <button class="btn btn-ghost" data-export="daily">⬇ Daily report (CSV)</button>
+            <button class="btn btn-ghost" data-export="monthly">⬇ Monthly report (CSV)</button>
+            <button class="btn btn-ghost" data-export="reconciliation">⬇ Reconciliation (CSV)</button>
+            <button class="btn btn-ghost" data-export="print">🖨 Printable report</button>
+          </div>
+          <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">
+            CSV files open directly in Excel / Google Sheets. Transaction exports respect the filters set on the
+            All Transactions tab. Printable reports open your browser's print dialog.
+          </p>
+        </div>
+
+        <div class="card overflow-hidden p-0">
+          <div class="flex items-center gap-3 px-4 pt-4">
+            <h2 class="card-title mb-0">Reconciliation report</h2>
+            <button id="recon-refresh" class="btn btn-ghost ml-auto">↻ Refresh</button>
+          </div>
+          <p class="text-xs text-slate-500 dark:text-slate-400 px-4 mt-1">
+            Flags missing references, duplicate candidates, refunds/reversals, amount mismatches and unknown directions.
+            Nothing here is changed automatically.
+          </p>
+          <div class="overflow-x-auto mt-3">
+            <table class="data-table">
+              <thead><tr><th>Type</th><th>Date</th><th class="text-right">Amount</th><th>Counterparty</th><th>Details</th></tr></thead>
+              <tbody id="recon-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================== Settings view ======================= -->
+      <section id="view-settings" class="view hidden space-y-6">
+        <div class="card">
+          <h2 class="card-title">Registered UPI IDs</h2>
+          <p class="text-sm text-slate-500 dark:text-slate-400 mb-3">
+            Enable or disable each ID for transaction matching. These are identifiers only — they are not
+            credentials and cannot read bank history by themselves.
+          </p>
+          <div id="upi-settings" class="space-y-3"></div>
+          <button id="upi-save" class="btn btn-primary mt-4">Save UPI settings</button>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">Data source &amp; synchronization</h2>
+          <div class="flex flex-wrap items-center gap-2 mb-3">
+            <button id="sync-now" class="btn btn-ghost">↻ Run sync now</button>
+            <button id="trigger-create" class="btn btn-ghost">⏱ Create 6-hour trigger</button>
+            <button id="trigger-remove" class="btn btn-ghost">⏱ Remove trigger</button>
+            <button id="disconnect" class="btn btn-danger ml-auto">Disconnect all integrations</button>
+          </div>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
+            Optional: connect an <strong>authorized</strong> provider webhook that returns statement rows in the
+            supported CSV format. This app never scrapes protected banking pages and never bypasses UPI/bank security.
+            Tokens are stored server-side in Script Properties and are never sent to the browser.
+          </p>
+          <div id="source-list" class="space-y-3"></div>
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mt-3">
+            <input id="src-name" class="field" placeholder="Source name">
+            <input id="src-url" class="field md:col-span-2" placeholder="https://provider.example/api/transactions">
+            <input id="src-token" class="field" type="password" placeholder="Bearer token (optional)">
+          </div>
+          <button id="src-add" class="btn btn-ghost mt-3">Add source</button>
+          <div id="sync-detail" class="mt-3 text-xs text-slate-500 dark:text-slate-400"></div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">Audit log</h2>
+          <div class="overflow-x-auto max-h-96 overflow-y-auto">
+            <table class="data-table">
+              <thead><tr><th>Timestamp (IST)</th><th>User</th><th>Action</th><th>Details</th></tr></thead>
+              <tbody id="audit-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card border-expense/40">
+          <h2 class="card-title text-expense">Danger zone</h2>
+          <p class="text-sm text-slate-500 dark:text-slate-400 mb-3">
+            Permanently clear every transaction from the ledger and rebuild the summary sheets. This cannot be undone.
+          </p>
+          <div class="flex flex-wrap items-center gap-2">
+            <input id="reset-confirm" class="field max-w-xs" placeholder="Type RESET to confirm">
+            <button id="reset-btn" class="btn btn-danger">Reset dashboard data</button>
+          </div>
+        </div>
+      </section>
+
+      <footer class="pt-2 pb-8 text-center text-[11px] text-slate-400">
+        UPI Payment History Dashboard · UPI IDs are used only to match imported transactions ·
+        No PIN / OTP / passwords are ever stored.
+      </footer>
+    </main>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="fixed bottom-5 right-5 z-50 hidden max-w-sm px-4 py-3 rounded-xl shadow-lg text-sm"></div>
+
+<!-- Hidden printable report -->
+<div id="print-area" class="print-only"></div>
+
+<script>
+/* tools/preview-mock.js
+ * ---------------------------------------------------------------------------
+ * Browser-only mock of google.script.run used by the static preview build.
+ * It returns the SAME shape of data the real server returns, populated from a
+ * clearly-fake demo dataset (the 12 rows in samples/sample-statement.csv).
+ *
+ * This file is NOT part of the Apps Script app and is never deployed.
+ * ---------------------------------------------------------------------------
+ */
+(function () {
+  'use strict';
+
+  var UPI_IDS = [
+    { id: '9363610085@ptyes', label: 'UPI ID 1', enabled: true },
+    { id: 'poovarasuzyra@okaxis', label: 'UPI ID 2', enabled: true }
+  ];
+
+  var DAILY = [
+    { date: '2026-10-01', received: 1200, sent: 349, incomingCount: 1, outgoingCount: 1, refunds: 0, net: 851, totalCount: 2 },
+    { date: '2026-10-02', received: 0, sent: 649, incomingCount: 0, outgoingCount: 2, refunds: 0, net: -649, totalCount: 2 },
+    { date: '2026-10-03', received: 2500, sent: 0, incomingCount: 1, outgoingCount: 0, refunds: 0, net: 2500, totalCount: 2 },
+    { date: '2026-10-04', received: 0, sent: 0, incomingCount: 0, outgoingCount: 0, refunds: 0, net: 0, totalCount: 1 },
+    { date: '2026-10-05', received: 0, sent: 450, incomingCount: 0, outgoingCount: 2, refunds: 0, net: -450, totalCount: 2 },
+    { date: '2026-10-06', received: 600, sent: 0, incomingCount: 1, outgoingCount: 0, refunds: 0, net: 600, totalCount: 1 },
+    { date: '2026-10-07', received: 0, sent: 220, incomingCount: 0, outgoingCount: 1, refunds: 300, net: -220, totalCount: 2 }
+  ];
+
+  var TXNS = [
+    ['2026-10-01', '09:12:00', '9363610085@ptyes', 'Money Received', 'Ravi Kumar', 'ravi.kumar@okhdfc', 1200, 'Successful', 'Other', 'UTR900001'],
+    ['2026-10-01', '13:40:00', 'poovarasuzyra@okaxis', 'Money Sent', 'Swiggy', 'swiggy@axisbank', 349, 'Successful', 'Food & Dining', 'UTR900002'],
+    ['2026-10-02', '08:05:00', 'poovarasuzyra@okaxis', 'Money Sent', 'Uber Ride', 'uber@paytm', 150, 'Successful', 'Travel', 'UTR900003'],
+    ['2026-10-02', '19:22:00', 'poovarasuzyra@okaxis', 'Money Sent', 'Amazon Pay', 'amazon@apl', 499, 'Successful', 'Shopping', 'UTR900004'],
+    ['2026-10-03', '10:00:00', '9363610085@ptyes', 'Money Received', 'Client Payment', 'vendor.acme@okicici', 2500, 'Successful', 'Business', 'UTR900005'],
+    ['2026-10-03', '11:15:00', 'poovarasuzyra@okaxis', 'Money Sent', 'Myntra', 'myntra@axisbank', 899, 'Pending', 'Shopping', 'UTR900006'],
+    ['2026-10-04', '16:45:00', 'poovarasuzyra@okaxis', 'Money Sent', 'Metro Card', 'metro@paytm', 75, 'Failed', 'Travel', 'UTR900007'],
+    ['2026-10-05', '12:30:00', 'poovarasuzyra@okaxis', 'Money Sent', 'Swiggy', 'swiggy@axisbank', 300, 'Successful', 'Food & Dining', 'UTR900008'],
+    ['2026-10-05', '12:35:00', 'poovarasuzyra@okaxis', 'Money Sent', 'Swiggy', 'swiggy@axisbank', 150, 'Successful', 'Food & Dining', 'UTR900009'],
+    ['2026-10-06', '20:10:00', '9363610085@ptyes', 'Money Received', 'Refund Zomato', 'zomato@axisbank', 600, 'Successful', 'Food & Dining', 'UTR900010'],
+    ['2026-10-07', '07:50:00', 'poovarasuzyra@okaxis', 'Money Sent', 'Jio Recharge', 'jio@axisbank', 220, 'Successful', 'Bills & Utilities', 'UTR900011'],
+    ['2026-10-07', '18:00:00', 'poovarasuzyra@okaxis', 'Money Sent', 'Amazon Return', 'amazon@apl', 300, 'Reversed', 'Shopping', 'UTR900012']
+  ].map(function (r, i) {
+    return {
+      key: 'REF:' + r[9], row: i + 2, transactionId: '', date: r[0], time: r[1], upiId: r[2],
+      type: r[3], counterparty: r[4], counterpartyUpi: r[5], amount: r[6], status: r[7],
+      category: r[8], utr: r[9], method: 'UPI', source: 'Statement: sample-statement.csv',
+      notes: '', lastUpdated: '2026-10-11 09:00:00'
+    };
+  });
+
+  function short(iso) {
+    var m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    var p = iso.split('-');
+    return (+p[2]) + ' ' + m[+p[1] - 1];
+  }
+
+  var running = [];
+  var cum = 0;
+  DAILY.forEach(function (d) { cum += d.net; running.push({ date: d.date, label: short(d.date), value: cum }); });
+
+  var dashboard = {
+    ok: true, today: '2026-10-11', range: 'last30', rangeLabel: 'Last 30 days',
+    summary: { received: 4300, sent: 1668, net: 2632, refunds: 300, successfulCount: 9, totalCount: 12, incomingCount: 3, outgoingCount: 6 },
+    byUpi: [
+      { id: '9363610085@ptyes', label: 'UPI ID 1', enabled: true, incomingCount: 3, incomingTotal: 4300, outgoingCount: 0, outgoingTotal: 0 },
+      { id: 'poovarasuzyra@okaxis', label: 'UPI ID 2', enabled: true, incomingCount: 0, incomingTotal: 0, outgoingCount: 6, outgoingTotal: 1668 }
+    ],
+    receivedVsSent: [{ name: 'Money Received', value: 4300 }, { name: 'Money Sent', value: 1668 }],
+    byUpiIncoming: [{ name: '9363610085@ptyes', value: 4300, count: 3 }],
+    byUpiOutgoing: [{ name: 'poovarasuzyra@okaxis', value: 1668, count: 6 }],
+    categories: [
+      { name: 'Food & Dining', value: 799, count: 3 },
+      { name: 'Shopping', value: 499, count: 1 },
+      { name: 'Bills & Utilities', value: 220, count: 1 },
+      { name: 'Travel', value: 150, count: 1 }
+    ],
+    dailyDistribution: DAILY.map(function (d) { return { date: d.date, label: short(d.date), received: d.received, sent: d.sent }; }),
+    statusCounts: [
+      { name: 'Successful', count: 9 }, { name: 'Pending', count: 1 },
+      { name: 'Failed', count: 1 }, { name: 'Reversed', count: 1 }
+    ],
+    runningNet: running,
+    dailySeries: DAILY.map(function (d) { return { date: d.date, label: short(d.date), received: d.received, sent: d.sent, net: d.net }; }),
+    monthly: [{ month: '2026-10', received: 4300, sent: 1668, net: 2632, count: 9 }],
+    yearly: [{ year: '2026', received: 4300, sent: 1668, net: 2632, count: 9 }],
+    config: { currencySymbol: '₹', upiIds: UPI_IDS, darkMode: false, sync: { lastSync: null, lastStatus: 'not_connected', lastMessage: 'Preview mode — demo data only.', sourceCount: 0, sources: [] } }
+  };
+
+  var overall = {
+    ok: true, generatedAt: '2026-10-11 09:00:00', firstDate: '2026-10-01', lastDate: '2026-10-07', upiIds: UPI_IDS,
+    dailySeries: DAILY,
+    stats: {
+      received: 4300, sent: 1668, net: 2632, refunds: 300, incomingCount: 3, outgoingCount: 6,
+      totalCount: 12, successfulCount: 9, avgIncoming: 1433.33, avgOutgoing: 278, maxIncoming: 2500, maxOutgoing: 499,
+      byUpi: dashboard.byUpi,
+      monthly: [{ month: '2026-10', received: 4300, sent: 1668, net: 2632, count: 9 }],
+      yearly: [{ year: '2026', received: 4300, sent: 1668, net: 2632, count: 9 }]
+    }
+  };
+
+  var MOCK = {
+    getDashboardData: function () { return dashboard; },
+    getOverallData: function () { return overall; },
+    getDailyHistory: function () { return { ok: true, rows: DAILY.slice().reverse(), today: '2026-10-11' }; },
+    getSettings: function () {
+      return {
+        ok: true,
+        config: { appName: 'UPI Payment History Dashboard', timezone: 'Asia/Kolkata', currencySymbol: '₹', darkMode: false, pageSize: 25, upiIds: UPI_IDS },
+        sync: { lastSync: null, lastStatus: 'not_connected', lastMessage: 'Preview mode — demo data only. Connect a real source after deploying.', sourceCount: 0, sources: [] },
+        spreadsheetUrl: '#', spreadsheetId: 'preview'
+      };
+    },
+    listTransactions: function (q) {
+      q = q || {};
+      var rows = TXNS.filter(function (t) {
+        if (q.upiId && t.upiId !== q.upiId) return false;
+        if (q.type && t.type !== q.type) return false;
+        if (q.status && t.status !== q.status) return false;
+        if (q.category && t.category !== q.category) return false;
+        if (q.search) {
+          var hay = (t.counterparty + ' ' + t.utr + ' ' + t.category).toLowerCase();
+          if (hay.indexOf(String(q.search).toLowerCase()) === -1) return false;
+        }
+        return true;
+      });
+      var size = q.pageSize || 25, page = q.page || 1;
+      var pages = Math.max(1, Math.ceil(rows.length / size));
+      page = Math.min(Math.max(1, page), pages);
+      return { ok: true, rows: rows.slice((page - 1) * size, page * size), total: rows.length, page: page, pages: pages, pageSize: size };
+    },
+    getAuditLog: function () {
+      return { ok: true, rows: [
+        { timestamp: '2026-10-11 09:00:00', user: 'you@example.com', action: 'import', details: 'Statement: sample-statement.csv — created 12, skipped 0' },
+        { timestamp: '2026-10-11 08:59:00', user: 'you@example.com', action: 'setup', details: 'Dashboard worksheets initialised' }
+      ] };
+    },
+    reconcileLedger: function () {
+      return { ok: true, generatedAt: '2026-10-11 09:00:00', transactionCount: 12, issueCount: 1, issues: [
+        { type: 'refund-reversal', date: '2026-10-07', amount: 300, counterparty: 'Amazon Return', message: 'Reversed / refunded transaction (excluded from received and sent totals)' }
+      ] };
+    },
+    getPrintReport: function () {
+      return { ok: true, generatedAt: '2026-10-11 09:00:00', rangeLabel: 'Last 30 days', summary: overall.stats, daily: DAILY.slice().reverse(), categories: dashboard.categories, upiIds: UPI_IDS };
+    },
+    exportTransactionsCsv: function () { return { ok: true, filename: 'upi-transactions.csv', content: 'Transaction ID,Transaction Date\n,2026-10-01', count: TXNS.length }; },
+    exportDailyCsv: function () { return { ok: true, filename: 'upi-daily-report.csv', content: 'Date,Received\n2026-10-01,1200', count: DAILY.length }; },
+    exportMonthlyCsv: function () { return { ok: true, filename: 'upi-monthly-report.csv', content: 'Month,Received\n2026-10,4300', count: 1 }; },
+    exportReconciliationCsv: function () { return { ok: true, filename: 'upi-reconciliation.csv', content: 'Issue Type\nrefund-reversal', count: 1 }; },
+    importTransactionsCsv: function () { return { ok: true, source: 'Pasted spreadsheet data', created: 3, updated: 0, skipped: 2, errors: [], totalRows: 5, syncedAt: '2026-10-11 09:00:00' }; },
+    addManualTransaction: function () { return { ok: true, transaction: {} }; },
+    reverseTransaction: function () { return { ok: true }; },
+    updateSettings: function (p) { return { ok: true, config: { upiIds: (p && p.upiIds) || UPI_IDS, darkMode: !!(p && p.darkMode) } }; },
+    addSyncSource: function () { return { ok: true, count: 1 }; },
+    removeSyncSource: function () { return { ok: true, count: 0 }; },
+    runSyncNow: function () { return { ok: true, status: 'not_connected', message: 'Preview mode — no live source.' }; },
+    disconnectIntegrations: function () { return { ok: true }; },
+    createDailySyncTrigger: function () { return { ok: true }; },
+    removeDailySyncTrigger: function () { return { ok: true }; },
+    resetDashboardData: function () { return { ok: true }; }
+  };
+
+  function makeChain(success, failure) {
+    var obj = {
+      withSuccessHandler: function (f) { return makeChain(f, failure); },
+      withFailureHandler: function (f) { return makeChain(success, f); }
+    };
+    Object.keys(MOCK).forEach(function (name) {
+      obj[name] = function () {
+        var args = Array.prototype.slice.call(arguments);
+        setTimeout(function () {
+          try { if (success) success(MOCK[name].apply(null, args)); }
+          catch (e) { if (failure) failure(e); }
+        }, 120);
+      };
+    });
+    return obj;
+  }
+
+  window.google = window.google || {};
+  window.google.script = { run: makeChain(null, null) };
+
+  // Offline fallbacks so the preview still renders without CDN access.
+  if (!window.google.charts) {
+    window.google.charts = { load: function () {}, setOnLoadCallback: function (cb) { setTimeout(cb, 0); } };
+  }
+  if (!window.google.visualization) {
+    function Noop() {}
+    Noop.prototype.draw = function () {};
+    window.google.visualization = {
+      PieChart: Noop, ColumnChart: Noop, LineChart: Noop,
+      DataTable: function () { this.addColumn = function () {}; this.addRows = function () {}; },
+      NumberFormat: function () { this.format = function () {}; }
+    };
+  }
+})();
+
+</script>
+<script>
+/* ==========================================================================
+ * Client.html — dashboard behaviour
+ * Runs inside the Apps Script web-app iframe. All heavy lifting happens on
+ * the server (google.script.run); this file only renders and collects input.
+ * ========================================================================== */
+(function () {
+  'use strict';
+
+  var state = {
+    view: 'dashboard',
+    range: 'last30',
+    dark: false,
+    dash: null,
+    upiView: 'incoming',
+    distView: 'received',
+    txQuery: { page: 1, pageSize: 25, sortBy: 'date', sortDir: 'desc' },
+    dailyFilter: '',
+    settings: null,
+    chartsLoaded: false,
+    pendingCharts: false
+  };
+
+  var RANGES = [
+    { key: 'today', label: 'Today' },
+    { key: 'yesterday', label: 'Yesterday' },
+    { key: 'last7', label: 'Last 7 days' },
+    { key: 'last30', label: 'Last 30 days' },
+    { key: 'month', label: 'This month' },
+    { key: 'year', label: 'This year' },
+    { key: 'all', label: 'All time' }
+  ];
+
+  var CATEGORIES = ['Food & Dining', 'Shopping', 'Travel', 'Bills & Utilities', 'Transfer', 'Business', 'Other'];
+
+  /* ------------------------------------------------------------ utilities */
+
+  function $(id) { return document.getElementById(id); }
+
+  function esc(v) {
+    return String(v === null || v === undefined ? '' : v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  var inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  function fmt(n) { return inr.format(Number(n) || 0); }
+  function num(n) { return new Intl.NumberFormat('en-IN').format(Number(n) || 0); }
+
+  function toast(msg, kind) {
+    var el = $('toast');
+    el.className = 'fixed bottom-5 right-5 z-50 max-w-sm px-4 py-3 rounded-xl shadow-lg text-sm ' + (kind || 'info');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+    clearTimeout(el._t);
+    el._t = setTimeout(function () { el.classList.add('hidden'); }, 4200);
+  }
+
+  function run(fnName, args, onOk, onErr) {
+    var chain = google.script.run
+      .withSuccessHandler(function (res) { if (onOk) onOk(res); })
+      .withFailureHandler(function (err) {
+        var msg = err && err.message ? err.message : String(err);
+        toast(msg, 'err');
+        if (onErr) onErr(err);
+      });
+    var list = args || [];
+    chain[fnName].apply(chain, list);
+  }
+
+  function debounce(fn, ms) {
+    var t;
+    return function () {
+      var a = arguments, self = this;
+      clearTimeout(t);
+      t = setTimeout(function () { fn.apply(self, a); }, ms || 250);
+    };
+  }
+
+  function statusBadge(status) {
+    var cls = status === 'Successful' ? 'badge-green'
+      : status === 'Failed' ? 'badge-red'
+      : status === 'Pending' ? 'badge-amber'
+      : status === 'Reversed' ? 'badge-orange' : 'badge-gray';
+    return '<span class="badge ' + cls + '">' + esc(status || 'Unknown') + '</span>';
+  }
+
+  function typeBadge(type, amount) {
+    if (type === 'Money Received') return '<span class="amount-in">+' + fmt(amount) + '</span>';
+    if (type === 'Money Sent') return '<span class="amount-out">−' + fmt(amount) + '</span>';
+    return '<span class="badge badge-gray">' + fmt(amount) + '</span>';
+  }
+
+  /* --------------------------------------------------------------- init */
+
+  document.addEventListener('DOMContentLoaded', function () {
+    buildRangePills();
+    bindNav();
+    bindSegToggles();
+    bindTransactions();
+    bindDaily();
+    bindImport();
+    bindReports();
+    bindSettings();
+    bindDark();
+
+    google.charts.load('current', { packages: ['corechart'] });
+    google.charts.setOnLoadCallback(function () {
+      state.chartsLoaded = true;
+      loadDashboard();
+    });
+
+    loadSettings(true);
+
+    window.addEventListener('resize', debounce(function () {
+      if (state.dash && state.view === 'dashboard') renderCharts();
+    }, 250));
+  });
+
+  /* ---------------------------------------------------------- navigation */
+
+  var VIEW_TITLES = {
+    dashboard: 'Dashboard',
+    transactions: 'All Transactions',
+    daily: 'Daily History',
+    overall: 'Overall History',
+    import: 'Import Statements',
+    reports: 'Reports',
+    settings: 'Settings'
+  };
+
+  function bindNav() {
+    document.querySelectorAll('[data-nav]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        switchView(btn.getAttribute('data-nav'));
+      });
+    });
+    $('menu-toggle').addEventListener('click', function () {
+      $('sidebar').classList.toggle('-translate-x-full');
+      $('sidebar-backdrop').classList.toggle('hidden');
+    });
+    $('sidebar-backdrop').addEventListener('click', function () {
+      $('sidebar').classList.add('-translate-x-full');
+      $('sidebar-backdrop').classList.add('hidden');
+    });
+  }
+
+  function switchView(view) {
+    state.view = view;
+    document.querySelectorAll('.view').forEach(function (s) { s.classList.add('hidden'); });
+    var target = $('view-' + view);
+    if (target) target.classList.remove('hidden');
+    document.querySelectorAll('[data-nav]').forEach(function (b) {
+      b.classList.toggle('is-active', b.getAttribute('data-nav') === view);
+    });
+    $('view-title').textContent = VIEW_TITLES[view] || 'Dashboard';
+
+    if (view === 'dashboard' && !state.dash) loadDashboard();
+    if (view === 'transactions') loadTransactions();
+    if (view === 'daily') loadDaily();
+    if (view === 'overall') loadOverall();
+    if (view === 'reports') loadReconciliation();
+    if (view === 'settings') loadSettings(false);
+
+    if (window.innerWidth < 1024) {
+      $('sidebar').classList.add('-translate-x-full');
+      $('sidebar-backdrop').classList.add('hidden');
+    }
+  }
+
+  function buildRangePills() {
+    var wrap = $('range-pills');
+    wrap.innerHTML = '';
+    RANGES.forEach(function (r) {
+      var b = document.createElement('button');
+      b.className = 'range-pill' + (r.key === state.range ? ' is-active' : '');
+      b.textContent = r.label;
+      b.setAttribute('data-range', r.key);
+      b.addEventListener('click', function () {
+        state.range = r.key;
+        document.querySelectorAll('.range-pill').forEach(function (p) {
+          p.classList.toggle('is-active', p.getAttribute('data-range') === state.range);
+        });
+        loadDashboard();
+      });
+      wrap.appendChild(b);
+    });
+  }
+
+  function bindSegToggles() {
+    document.querySelectorAll('.seg').forEach(function (seg) {
+      seg.querySelectorAll('.seg-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          seg.querySelectorAll('.seg-btn').forEach(function (b) { b.classList.remove('is-active'); });
+          btn.classList.add('is-active');
+          var val = btn.getAttribute('data-val');
+          if (seg.getAttribute('data-seg') === 'upi') state.upiView = val;
+          if (seg.getAttribute('data-seg') === 'dailydist') state.distView = val;
+          if (state.dash) renderCharts();
+        });
+      });
+    });
+  }
+
+  /* ------------------------------------------------------------ dashboard */
+
+  function loadDashboard() {
+    run('getDashboardData', [state.range], function (data) {
+      state.dash = data;
+      renderSummary(data);
+      if (state.chartsLoaded) renderCharts(); else state.pendingCharts = true;
+      renderSyncPill(data.config.sync);
+      renderUpiChips(data.config.upiIds);
+      var anyData = data.summary.totalCount > 0;
+      $('demo-note').classList.toggle('hidden', anyData);
+    });
+  }
+
+  function renderSummary(data) {
+    var s = data.summary;
+    $('card-received').textContent = fmt(s.received);
+    $('card-sent').textContent = fmt(s.sent);
+    var netEl = $('card-net');
+    netEl.textContent = (s.net < 0 ? '−' : '') + fmt(Math.abs(s.net));
+    netEl.className = 'stat-value ' + (s.net >= 0 ? 'text-income' : 'text-expense');
+    $('card-count').textContent = num(s.successfulCount);
+    $('card-received-sub').textContent = num(s.incomingCount) + ' incoming payments';
+    $('card-sent-sub').textContent = num(s.outgoingCount) + ' outgoing payments';
+    $('card-net-sub').textContent = 'Received − Sent · ' + data.rangeLabel;
+    $('card-count-sub').textContent = 'of ' + num(s.totalCount) + ' total in period';
+  }
+
+  function renderUpiChips(upiIds) {
+    var wrap = $('upi-chips');
+    wrap.innerHTML = '';
+    (upiIds || []).forEach(function (u) {
+      var span = document.createElement('span');
+      span.className = 'text-[11px] px-2.5 py-1 rounded-full badge ' + (u.enabled ? 'badge-blue' : 'badge-gray');
+      span.textContent = u.id;
+      span.title = u.enabled ? 'Active for matching' : 'Disabled for matching';
+      wrap.appendChild(span);
+    });
+  }
+
+  function renderSyncPill(sync) {
+    sync = sync || {};
+    var dot = $('sync-dot'), text = $('sync-text');
+    var map = {
+      success: ['bg-green-500', sync.lastSync ? 'Synced ' + sync.lastSync : 'Synced'],
+      error: ['bg-red-500', 'Sync error'],
+      not_connected: ['bg-slate-400', 'Not connected']
+    };
+    var m = map[sync.lastStatus] || map.not_connected;
+    dot.className = 'w-2 h-2 rounded-full ' + m[0];
+    text.textContent = m[1];
+    $('last-sync').textContent = sync.lastSync
+      ? 'Last sync: ' + sync.lastSync + ' IST'
+      : 'No live bank connection — import statements or add manually';
+    $('sync-detail').textContent = sync.lastMessage || '';
+  }
+
+  /* --------------------------------------------------------------- charts */
+
+  var COLORS = ['#16a34a', '#dc2626', '#2563eb', '#f59e0b', '#8b5cf6', '#0891b2', '#64748b', '#ec4899'];
+
+  function chartText() { return state.dark ? '#e2e8f0' : '#334155'; }
+  function chartGrid() { return state.dark ? '#334155' : '#e2e8f0'; }
+
+  function baseOptions(title) {
+    return {
+      backgroundColor: 'transparent',
+      title: '',
+      titleTextStyle: { color: chartText(), fontSize: 13 },
+      legend: { position: 'bottom', textStyle: { color: chartText(), fontSize: 12 } },
+      chartArea: { left: 20, top: 16, width: '90%', height: '72%' },
+      colors: COLORS
+    };
+  }
+
+  function moneyFormat(dt, col) {
+    var f = new google.visualization.NumberFormat({ prefix: '₹', pattern: '#,##0.00' });
+    f.format(dt, col);
+  }
+
+  function chartEl(id) { return $(id); }
+
+  function showEmpty(id, message) {
+    var el = chartEl(id);
+    el.innerHTML = '<div class="chart-empty"><div class="text-2xl">📊</div><div>' +
+      esc(message || 'No data for the selected period') + '</div></div>';
+  }
+
+  function clearEmpty(id) {
+    var el = chartEl(id);
+    var empty = el.querySelector('.chart-empty');
+    if (empty) el.innerHTML = '';
+    return el;
+  }
+
+  function drawPie(id, rows, opts) {
+    var data = (rows || []).filter(function (r) { return (r.value || 0) > 0; });
+    if (!data.length) { showEmpty(id, opts && opts.empty); return; }
+    var el = clearEmpty(id);
+    var dt = new google.visualization.DataTable();
+    dt.addColumn('string', 'Label');
+    dt.addColumn('number', 'Amount');
+    dt.addRows(data.map(function (r) { return [r.name, Number(r.value) || 0]; }));
+    moneyFormat(dt, 1);
+    var options = baseOptions();
+    options.pieHole = 0.45;
+    options.pieSliceText = (opts && opts.sliceText) || 'percentage';
+    options.pieSliceTextStyle = { color: '#fff', fontSize: 11 };
+    options.tooltip = { text: 'value', textStyle: { color: chartText() } };
+    options.legend = { position: 'right', textStyle: { color: chartText(), fontSize: 12 } };
+    options.chartArea = { left: 10, top: 10, width: '62%', height: '88%' };
+    if (opts && opts.colors) options.colors = opts.colors;
+    new google.visualization.PieChart(el).draw(dt, options);
+  }
+
+  function drawBars(id, labels, series, opts) {
+    if (!labels || !labels.length) { showEmpty(id, opts && opts.empty); return; }
+    var el = clearEmpty(id);
+    var dt = new google.visualization.DataTable();
+    dt.addColumn('string', 'Period');
+    series.forEach(function (s) { dt.addColumn('number', s.name); });
+    dt.addRows(labels.map(function (label, i) {
+      return [label].concat(series.map(function (s) { return Number(s.values[i]) || 0; }));
+    }));
+    for (var c = 1; c <= series.length; c++) moneyFormat(dt, c);
+    var options = baseOptions();
+    options.legend = { position: 'bottom', textStyle: { color: chartText(), fontSize: 12 } };
+    options.colors = opts && opts.colors ? opts.colors : ['#16a34a', '#dc2626'];
+    options.bar = { groupWidth: '62%' };
+    options.hAxis = { textStyle: { color: chartText(), fontSize: 11 }, gridlines: { color: 'transparent' } };
+    options.vAxis = { textStyle: { color: chartText(), fontSize: 11 }, gridlines: { color: chartGrid() }, minValue: 0 };
+    options.chartArea = { left: 80, top: 16, width: '86%', height: '68%' };
+    new google.visualization.ColumnChart(el).draw(dt, options);
+  }
+
+  function drawLine(id, labels, values, opts) {
+    if (!labels || !labels.length) { showEmpty(id, opts && opts.empty); return; }
+    var el = clearEmpty(id);
+    var dt = new google.visualization.DataTable();
+    dt.addColumn('string', 'Date');
+    dt.addColumn('number', 'Cumulative Net');
+    dt.addRows(labels.map(function (l, i) { return [l, Number(values[i]) || 0]; }));
+    moneyFormat(dt, 1);
+    var options = baseOptions();
+    options.colors = ['#2563eb'];
+    options.curveType = 'function';
+    options.pointSize = 4;
+    options.legend = { position: 'none' };
+    options.hAxis = { textStyle: { color: chartText(), fontSize: 11 } };
+    options.vAxis = { textStyle: { color: chartText(), fontSize: 11 }, gridlines: { color: chartGrid() } };
+    options.chartArea = { left: 80, top: 16, width: '86%', height: '72%' };
+    new google.visualization.LineChart(el).draw(dt, options);
+  }
+
+  function renderCharts() {
+    var d = state.dash;
+    if (!d) return;
+
+    drawPie('chart-received-sent', d.receivedVsSent, {
+      sliceText: 'percentage',
+      colors: ['#16a34a', '#dc2626'],
+      empty: 'No successful payments in this period'
+    });
+
+    var upiRows = state.upiView === 'incoming' ? d.byUpiIncoming : d.byUpiOutgoing;
+    drawPie('chart-upi', upiRows, {
+      colors: state.upiView === 'incoming' ? ['#16a34a', '#22c55e', '#4ade80', '#86efac'] : ['#dc2626', '#ef4444', '#f87171', '#fca5a5'],
+      empty: 'No successful ' + state.upiView + ' payments in this period'
+    });
+
+    drawPie('chart-categories', d.categories, {
+      colors: ['#2563eb', '#f59e0b', '#8b5cf6', '#0891b2', '#ec4899', '#22c55e', '#64748b'],
+      empty: 'No outgoing payments in this period'
+    });
+
+    var distRows = (d.dailyDistribution || []).map(function (row) {
+      return { name: row.label, value: state.distView === 'received' ? row.received : row.sent };
+    });
+    drawPie('chart-daily-dist', distRows, {
+      colors: ['#0ea5e9', '#22d3ee', '#38bdf8', '#7dd3fc', '#0284c7', '#0369a1', '#075985'],
+      empty: 'No ' + state.distView + ' payments in this period'
+    });
+
+    var ds = d.dailySeries || [];
+    drawBars('chart-daily-bar', ds.map(function (x) { return x.label; }), [
+      { name: 'Received', values: ds.map(function (x) { return x.received; }) },
+      { name: 'Sent', values: ds.map(function (x) { return x.sent; }) }
+    ], { empty: 'No transactions in this period' });
+
+    var mo = d.monthly || [];
+    drawBars('chart-monthly', mo.map(function (x) { return x.month; }), [
+      { name: 'Received', values: mo.map(function (x) { return x.received; }) },
+      { name: 'Sent', values: mo.map(function (x) { return x.sent; }) }
+    ], { empty: 'No monthly data yet' });
+
+    var yr = d.yearly || [];
+    drawBars('chart-yearly', yr.map(function (x) { return x.year; }), [
+      { name: 'Received', values: yr.map(function (x) { return x.received; }) },
+      { name: 'Sent', values: yr.map(function (x) { return x.sent; }) }
+    ], { empty: 'No yearly data yet' });
+
+    drawPie('chart-status', (d.statusCounts || []).map(function (s) {
+      return { name: s.name, value: s.count };
+    }), {
+      colors: ['#16a34a', '#f59e0b', '#dc2626', '#f97316', '#64748b'],
+      empty: 'No transactions in this period'
+    });
+
+    var rn = d.runningNet || [];
+    drawLine('chart-running', rn.map(function (x) { return x.label; }),
+      rn.map(function (x) { return x.value; }), { empty: 'No data in this period' });
+  }
+
+  /* --------------------------------------------------------- transactions */
+
+  function bindTransactions() {
+    $('f-apply').addEventListener('click', function () { state.txQuery.page = 1; loadTransactions(); });
+    $('f-clear').addEventListener('click', function () {
+      ['f-search', 'f-upi', 'f-type', 'f-status', 'f-category', 'f-from', 'f-to'].forEach(function (id) { $(id).value = ''; });
+      state.txQuery = { page: 1, pageSize: 25, sortBy: 'date', sortDir: 'desc' };
+      loadTransactions();
+    });
+    $('f-search').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { state.txQuery.page = 1; loadTransactions(); }
+    });
+    $('f-export').addEventListener('click', function () { exportFile('transactions'); });
+    $('page-prev').addEventListener('click', function () {
+      if (state.txQuery.page > 1) { state.txQuery.page--; loadTransactions(); }
+    });
+    $('page-next').addEventListener('click', function () {
+      state.txQuery.page++; loadTransactions();
+    });
+    document.querySelectorAll('#view-transactions th[data-sort]').forEach(function (th) {
+      th.addEventListener('click', function () {
+        var key = th.getAttribute('data-sort');
+        if (state.txQuery.sortBy === key) {
+          state.txQuery.sortDir = state.txQuery.sortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+          state.txQuery.sortBy = key;
+          state.txQuery.sortDir = 'desc';
+        }
+        loadTransactions();
+      });
+    });
+  }
+
+  function txFilters() {
+    return {
+      search: $('f-search').value,
+      upiId: $('f-upi').value,
+      type: $('f-type').value,
+      status: $('f-status').value,
+      category: $('f-category').value,
+      dateFrom: $('f-from').value,
+      dateTo: $('f-to').value
+    };
+  }
+
+  function loadTransactions() {
+    var q = Object.assign({}, state.txQuery, txFilters());
+    $('txn-body').innerHTML = '<tr><td colspan="11" class="text-center py-6 text-slate-400">Loading…</td></tr>';
+    run('listTransactions', [q], function (res) {
+      renderTransactions(res);
+    });
+  }
+
+  function renderTransactions(res) {
+    state.txQuery.page = res.page;
+    var body = $('txn-body');
+    if (!res.rows.length) {
+      body.innerHTML = '<tr><td colspan="11" class="text-center py-8 text-slate-400">No transactions match your filters.</td></tr>';
+    } else {
+      body.innerHTML = res.rows.map(function (t) {
+        return '<tr>' +
+          '<td>' + esc(t.date) + '</td>' +
+          '<td>' + esc((t.time || '').slice(0, 5)) + '</td>' +
+          '<td title="' + esc(t.counterpartyUpi || '') + '">' + esc(t.counterparty || '—') + '</td>' +
+          '<td class="text-xs">' + esc(t.upiId || '—') + '</td>' +
+          '<td class="text-xs">' + esc(t.type) + '</td>' +
+          '<td class="text-xs">' + esc(t.category) + '</td>' +
+          '<td class="text-right">' + typeBadge(t.type, t.amount) + '</td>' +
+          '<td>' + statusBadge(t.status) + '</td>' +
+          '<td class="text-xs" title="' + esc(t.utr || '') + '">' + esc(t.utr || '—') + '</td>' +
+          '<td class="text-xs">' + esc(t.source || '') + '</td>' +
+          '<td><button class="text-xs underline text-expense" data-reverse="' + esc(t.key) + '">Reverse</button></td>' +
+          '</tr>';
+      }).join('');
+      body.querySelectorAll('[data-reverse]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var key = btn.getAttribute('data-reverse');
+          var reason = window.prompt('Reason for reversing this transaction (refund / chargeback / correction):', '');
+          if (reason === null) return;
+          run('reverseTransaction', [key, reason], function () {
+            toast('Transaction marked as reversed. Original record preserved.', 'ok');
+            loadTransactions();
+            loadDashboard();
+          });
+        });
+      });
+    }
+    $('txn-meta').textContent = num(res.total) + ' transaction(s)';
+    $('page-info').textContent = 'Page ' + res.page + ' of ' + res.pages;
+    $('page-prev').disabled = res.page <= 1;
+    $('page-next').disabled = res.page >= res.pages;
+    $('page-next').dataset.pages = res.pages;
+  }
+
+  /* ---------------------------------------------------------------- daily */
+
+  function bindDaily() {
+    $('daily-date').addEventListener('change', function () {
+      state.dailyFilter = $('daily-date').value;
+      loadDaily();
+    });
+    $('daily-all').addEventListener('click', function () {
+      state.dailyFilter = '';
+      $('daily-date').value = '';
+      loadDaily();
+    });
+  }
+
+  function loadDaily() {
+    $('daily-body').innerHTML = '<tr><td colspan="8" class="text-center py-6 text-slate-400">Loading…</td></tr>';
+    run('getDailyHistory', [state.dailyFilter || ''], function (res) {
+      var body = $('daily-body');
+      if (!res.rows.length) {
+        body.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-slate-400">No daily data yet.</td></tr>';
+        return;
+      }
+      body.innerHTML = res.rows.map(function (d) {
+        var netCls = d.net >= 0 ? 'amount-in' : 'amount-out';
+        return '<tr>' +
+          '<td>' + esc(d.date) + '</td>' +
+          '<td class="text-right amount-in">' + fmt(d.received) + '</td>' +
+          '<td class="text-right amount-out">' + fmt(d.sent) + '</td>' +
+          '<td class="text-right">' + fmt(d.refunds) + '</td>' +
+          '<td class="text-right ' + netCls + '">' + fmt(d.net) + '</td>' +
+          '<td class="text-right">' + num(d.incomingCount) + '</td>' +
+          '<td class="text-right">' + num(d.outgoingCount) + '</td>' +
+          '<td class="text-right">' + num(d.totalCount) + '</td>' +
+          '</tr>';
+      }).join('');
+    });
+  }
+
+  /* --------------------------------------------------------------- overall */
+
+  function loadOverall() {
+    run('getOverallData', [], function (res) {
+      var s = res.stats;
+      var cards = [
+        ['Total Received', fmt(s.received), 'text-income', s.incomingCount + ' incoming'],
+        ['Total Sent', fmt(s.sent), 'text-expense', s.outgoingCount + ' outgoing'],
+        ['Net Payment Flow', (s.net < 0 ? '−' : '') + fmt(Math.abs(s.net)), s.net >= 0 ? 'text-income' : 'text-expense', 'Lifetime'],
+        ['Refunds & Reversals', fmt(s.refunds), 'text-info', 'Excluded from totals'],
+        ['Average Incoming', fmt(s.avgIncoming), 'text-income', 'Per successful payment'],
+        ['Average Outgoing', fmt(s.avgOutgoing), 'text-expense', 'Per successful payment'],
+        ['Highest Incoming', fmt(s.maxIncoming), 'text-income', 'Single payment'],
+        ['Highest Outgoing', fmt(s.maxOutgoing), 'text-expense', 'Single payment']
+      ];
+      $('overall-cards').innerHTML = cards.map(function (c) {
+        return '<div class="card stat-card"><div class="stat-label">' + c[0] + '</div>' +
+          '<div class="stat-value ' + c[2] + '">' + c[1] + '</div>' +
+          '<div class="stat-sub">' + c[3] + '</div></div>';
+      }).join('');
+
+      $('overall-monthly').innerHTML = (s.monthly.length ? s.monthly : []).map(function (m) {
+        return '<tr><td>' + esc(m.month) + '</td><td class="text-right amount-in">' + fmt(m.received) +
+          '</td><td class="text-right amount-out">' + fmt(m.sent) + '</td><td class="text-right">' + fmt(m.net) +
+          '</td><td class="text-right">' + num(m.count) + '</td></tr>';
+      }).join('') || '<tr><td colspan="5" class="text-center py-6 text-slate-400">No data yet.</td></tr>';
+
+      $('overall-yearly').innerHTML = (s.yearly.length ? s.yearly : []).map(function (y) {
+        return '<tr><td>' + esc(y.year) + '</td><td class="text-right amount-in">' + fmt(y.received) +
+          '</td><td class="text-right amount-out">' + fmt(y.sent) + '</td><td class="text-right">' + fmt(y.net) +
+          '</td><td class="text-right">' + num(y.count) + '</td></tr>';
+      }).join('') || '<tr><td colspan="5" class="text-center py-6 text-slate-400">No data yet.</td></tr>';
+
+      $('overall-upi').innerHTML = s.byUpi.map(function (u) {
+        return '<tr><td>' + esc(u.id) + '</td><td>' + (u.enabled ? '<span class="badge badge-green">Yes</span>' : '<span class="badge badge-gray">No</span>') +
+          '</td><td class="text-right">' + num(u.incomingCount) + '</td><td class="text-right amount-in">' + fmt(u.incomingTotal) +
+          '</td><td class="text-right">' + num(u.outgoingCount) + '</td><td class="text-right amount-out">' + fmt(u.outgoingTotal) + '</td></tr>';
+      }).join('') || '<tr><td colspan="6" class="text-center py-6 text-slate-400">No data yet.</td></tr>';
+    });
+  }
+
+  /* ---------------------------------------------------------------- import */
+
+  function bindImport() {
+    var dz = $('dropzone');
+    var input = $('file-input');
+
+    dz.addEventListener('click', function () { input.click(); });
+    input.addEventListener('change', function () {
+      if (input.files && input.files[0]) readAndImport(input.files[0]);
+      input.value = '';
+    });
+    ['dragenter', 'dragover'].forEach(function (ev) {
+      dz.addEventListener(ev, function (e) { e.preventDefault(); dz.classList.add('is-over'); });
+    });
+    ['dragleave', 'drop'].forEach(function (ev) {
+      dz.addEventListener(ev, function (e) { e.preventDefault(); dz.classList.remove('is-over'); });
+    });
+    dz.addEventListener('drop', function (e) {
+      var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) readAndImport(f);
+    });
+
+    $('paste-import').addEventListener('click', function () {
+      var text = $('paste-data').value;
+      if (!text.trim()) { toast('Paste some rows first.', 'err'); return; }
+      doImport('Pasted data', text, 'Pasted spreadsheet data');
+    });
+
+    $('manual-save').addEventListener('click', saveManual);
+    fillCategories($('m-category'));
+  }
+
+  function fillCategories(select, includeBlank) {
+    select.innerHTML = (includeBlank ? '<option value="">All</option>' : '') +
+      CATEGORIES.map(function (c) { return '<option>' + c + '</option>'; }).join('');
+  }
+
+  function readAndImport(file) {
+    if (file.size > 4 * 1024 * 1024) { toast('File is larger than 4 MB. Please split the statement.', 'err'); return; }
+    var reader = new FileReader();
+    reader.onload = function (e) { doImport(file.name, e.target.result, 'Statement: ' + file.name); };
+    reader.onerror = function () { toast('Could not read the file.', 'err'); };
+    reader.readAsText(file);
+  }
+
+  function doImport(name, content, sourceLabel) {
+    var box = $('import-result');
+    box.classList.remove('hidden');
+    box.innerHTML = '<div class="text-sm text-slate-500">Importing…</div>';
+    run('importTransactionsCsv', [name, content, sourceLabel], function (res) {
+      var html = '<div class="rounded-xl border border-slate-200 dark:border-slate-700 p-4">' +
+        '<div class="font-semibold mb-2">Import complete — ' + esc(res.source) + '</div>' +
+        '<div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">' +
+        resultStat('New transactions', res.created, 'text-income') +
+        resultStat('Updated', res.updated, 'text-info') +
+        resultStat('Duplicates skipped', res.skipped, 'text-slate-500') +
+        resultStat('Rows with errors', res.errors.length, res.errors.length ? 'text-expense' : 'text-slate-500') +
+        '</div>';
+      if (res.errors.length) {
+        html += '<div class="mt-3 text-xs max-h-40 overflow-y-auto"><div class="font-semibold mb-1">Skipped rows</div>' +
+          res.errors.slice(0, 50).map(function (er) {
+            return '<div class="text-slate-500">Row ' + er.row + ': ' + esc(er.error) + '</div>';
+          }).join('') + '</div>';
+      }
+      html += '</div>';
+      box.innerHTML = html;
+      toast('Imported ' + res.created + ' new, updated ' + res.updated + ', skipped ' + res.skipped + '.', 'ok');
+      state.dash = null;
+      loadSettings(true);
+      loadDashboard();
+    }, function () {
+      box.innerHTML = '<div class="rounded-xl border border-expense/40 text-expense p-4 text-sm">Import failed. See the message above.</div>';
+    });
+  }
+
+  function resultStat(label, value, cls) {
+    return '<div class="rounded-lg bg-slate-50 dark:bg-slate-800 px-3 py-2">' +
+      '<div class="text-xs text-slate-500">' + label + '</div>' +
+      '<div class="text-lg font-semibold ' + cls + '">' + num(value) + '</div></div>';
+  }
+
+  function saveManual() {
+    var fields = {
+      date: $('m-date').value,
+      time: $('m-time').value,
+      type: $('m-type').value,
+      amount: $('m-amount').value,
+      status: $('m-status').value,
+      category: $('m-category').value,
+      counterparty: $('m-party').value,
+      counterpartyUpi: $('m-party-upi').value,
+      upiId: $('m-upi').value,
+      utr: $('m-utr').value,
+      method: $('m-method').value,
+      notes: $('m-notes').value
+    };
+    var msg = $('manual-msg');
+    msg.textContent = 'Saving…';
+    msg.className = 'text-sm text-slate-500';
+    run('addManualTransaction', [fields], function () {
+      msg.textContent = 'Saved ✓';
+      msg.className = 'text-sm text-income font-medium';
+      toast('Manual transaction saved to the ledger.', 'ok');
+      ['m-amount', 'm-party', 'm-party-upi', 'm-utr', 'm-notes'].forEach(function (id) { $(id).value = ''; });
+      state.dash = null;
+      loadDashboard();
+    }, function () {
+      msg.textContent = 'Could not save — see the error message.';
+      msg.className = 'text-sm text-expense';
+    });
+  }
+
+  /* ---------------------------------------------------------------- reports */
+
+  function bindReports() {
+    document.querySelectorAll('[data-export]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        exportFile(btn.getAttribute('data-export'));
+      });
+    });
+    $('recon-refresh').addEventListener('click', loadReconciliation);
+  }
+
+  function exportFile(kind) {
+    if (kind === 'print') { printReport(); return; }
+
+    var fnMap = {
+      transactions: ['exportTransactionsCsv', [txFilters()]],
+      daily: ['exportDailyCsv', [state.range]],
+      monthly: ['exportMonthlyCsv', []],
+      reconciliation: ['exportReconciliationCsv', []]
+    };
+    var entry = fnMap[kind];
+    if (!entry) return;
+    toast('Preparing export…', 'info');
+    run(entry[0], entry[1], function (res) {
+      if (!res.content) { toast('Nothing to export.', 'err'); return; }
+      downloadCsv(res.filename, res.content);
+      toast('Exported ' + num(res.count) + ' row(s).', 'ok');
+    });
+  }
+
+  function downloadCsv(filename, content) {
+    var blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+  }
+
+  function loadReconciliation() {
+    $('recon-body').innerHTML = '<tr><td colspan="5" class="text-center py-6 text-slate-400">Checking…</td></tr>';
+    run('reconcileLedger', [], function (res) {
+      var body = $('recon-body');
+      if (!res.issues.length) {
+        body.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-income">No issues found across ' + num(res.transactionCount) + ' transactions 🎉</td></tr>';
+        return;
+      }
+      body.innerHTML = res.issues.map(function (i) {
+        var cls = i.type === 'missing-reference' ? 'badge-amber'
+          : i.type === 'duplicate-candidate' ? 'badge-blue'
+          : i.type === 'refund-reversal' ? 'badge-orange'
+          : i.type === 'amount-mismatch' ? 'badge-red' : 'badge-gray';
+        return '<tr><td><span class="badge ' + cls + '">' + esc(i.type) + '</span></td>' +
+          '<td>' + esc(i.date || '') + '</td><td class="text-right">' + fmt(i.amount) + '</td>' +
+          '<td>' + esc(i.counterparty || '—') + '</td><td class="text-xs">' + esc(i.message) + '</td></tr>';
+      }).join('');
+      toast(res.issueCount + ' reconciliation issue(s) found.', 'info');
+    });
+  }
+
+  function printReport() {
+    run('getPrintReport', [state.range], function (r) {
+      var area = $('print-area');
+      var s = r.summary;
+      var html = '';
+      html += '<h1>UPI Payment History — Report</h1>';
+      html += '<div>Period: ' + esc(r.rangeLabel) + ' &nbsp;·&nbsp; Generated: ' + esc(r.generatedAt) + ' IST</div>';
+      html += '<div>Registered UPI IDs: ' + r.upiIds.map(function (u) { return esc(u.id) + (u.enabled ? '' : ' (disabled)'); }).join(', ') + '</div>';
+      html += '<h2>Summary</h2>';
+      html += '<table><tr><th>Metric</th><th>Value</th></tr>' +
+        row('Total Received', fmt(s.received)) + row('Total Sent', fmt(s.sent)) +
+        row('Net Payment Flow', fmt(s.net)) + row('Refunds & Reversals', fmt(s.refunds)) +
+        row('Incoming Transactions', num(s.incomingCount)) + row('Outgoing Transactions', num(s.outgoingCount)) +
+        row('Successful Transactions', num(s.successfulCount)) + row('Total Transactions', num(s.totalCount)) + '</table>';
+      html += '<h2>Daily Breakdown</h2><table><tr><th>Date</th><th>Received</th><th>Sent</th><th>Refunds</th><th>Net</th><th>Txns</th></tr>';
+      r.daily.forEach(function (d) {
+        html += '<tr><td>' + esc(d.date) + '</td><td>' + fmt(d.received) + '</td><td>' + fmt(d.sent) +
+          '</td><td>' + fmt(d.refunds) + '</td><td>' + fmt(d.net) + '</td><td>' + num(d.totalCount) + '</td></tr>';
+      });
+      html += '</table>';
+      html += '<h2>Spending by Category</h2><table><tr><th>Category</th><th>Amount</th><th>Txns</th></tr>';
+      r.categories.forEach(function (c) {
+        html += '<tr><td>' + esc(c.name) + '</td><td>' + fmt(c.value) + '</td><td>' + num(c.count) + '</td></tr>';
+      });
+      html += '</table>';
+      html += '<p style="margin-top:16px;font-size:11px">Received/Sent include only successful transactions. Refunds and reversals are reported separately and never double-counted.</p>';
+      area.innerHTML = html;
+      window.print();
+    });
+  }
+
+  function row(k, v) { return '<tr><td>' + esc(k) + '</td><td>' + esc(v) + '</td></tr>'; }
+
+  /* --------------------------------------------------------------- settings */
+
+  function bindSettings() {
+    $('dark-toggle').addEventListener('click', function () {
+      setDark(!state.dark);
+      run('updateSettings', [{ darkMode: state.dark }], function () {});
+    });
+    $('upi-save').addEventListener('click', saveUpiSettings);
+    $('src-add').addEventListener('click', addSource);
+    $('sync-now').addEventListener('click', function () {
+      toast('Running sync…', 'info');
+      run('runSyncNow', [], function (res) {
+        toast(res.status === 'not_connected'
+          ? 'No authorized source connected — nothing to sync.'
+          : (res.ok ? 'Sync completed.' : 'Sync finished with errors.'), res.ok ? 'ok' : 'err');
+        loadSettings(true);
+      });
+    });
+    $('trigger-create').addEventListener('click', function () {
+      run('createDailySyncTrigger', [], function () { toast('6-hour sync trigger created.', 'ok'); });
+    });
+    $('trigger-remove').addEventListener('click', function () {
+      run('removeDailySyncTrigger', [], function () { toast('Sync trigger removed.', 'ok'); });
+    });
+    $('disconnect').addEventListener('click', function () {
+      if (!window.confirm('Disconnect all integrations and delete stored tokens?')) return;
+      run('disconnectIntegrations', [], function () {
+        toast('All integrations disconnected.', 'ok');
+        loadSettings(true);
+      });
+    });
+    $('reset-btn').addEventListener('click', function () {
+      var text = $('reset-confirm').value;
+      if (text.toUpperCase() !== 'RESET') { toast('Type RESET to confirm.', 'err'); return; }
+      if (!window.confirm('This permanently deletes every transaction. Continue?')) return;
+      run('resetDashboardData', [text], function () {
+        toast('Dashboard data cleared.', 'ok');
+        $('reset-confirm').value = '';
+        state.dash = null;
+        loadSettings(true);
+        loadDashboard();
+      });
+    });
+  }
+
+  function bindDark() {
+    var stored = null;
+    try { stored = window.localStorage.getItem('upi-dark'); } catch (e) {}
+    if (stored === '1') setDark(true);
+  }
+
+  function setDark(on) {
+    state.dark = on;
+    document.documentElement.classList.toggle('dark', on);
+    $('dark-toggle').textContent = on ? '☀️' : '🌙';
+    try { window.localStorage.setItem('upi-dark', on ? '1' : '0'); } catch (e) {}
+    if (state.dash && state.view === 'dashboard') renderCharts();
+  }
+
+  function loadSettings(quiet) {
+    run('getSettings', [], function (res) {
+      state.settings = res;
+      setDark(!!res.config.darkMode || state.dark);
+      renderUpiSettings(res.config.upiIds);
+      renderSources(res.sync);
+      renderSyncPill(res.sync);
+      renderSyncDetail(res);
+      loadAudit();
+      fillUpiSelects(res.config.upiIds);
+    });
+  }
+
+  function fillUpiSelects(upiIds) {
+    var opts = '<option value="">All UPI IDs</option>' + (upiIds || []).map(function (u) {
+      return '<option value="' + esc(u.id) + '">' + esc(u.id) + '</option>';
+    }).join('');
+    $('f-upi').innerHTML = opts;
+    $('m-upi').innerHTML = '<option value="">— none —</option>' + (upiIds || []).map(function (u) {
+      return '<option>' + esc(u.id) + '</option>';
+    }).join('');
+    $('f-category').innerHTML = '<option value="">All</option>' +
+      CATEGORIES.map(function (c) { return '<option>' + c + '</option>'; }).join('');
+  }
+
+  function renderUpiSettings(upiIds) {
+    $('upi-settings').innerHTML = (upiIds || []).map(function (u, i) {
+      return '<div class="flex items-center gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-700">' +
+        '<div class="flex-1"><div class="font-medium">' + esc(u.label) + '</div>' +
+        '<div class="text-xs text-slate-500">' + esc(u.id) + '</div></div>' +
+        '<label class="flex items-center gap-2 text-sm">' +
+        '<input type="checkbox" data-upi-index="' + i + '" ' + (u.enabled !== false ? 'checked' : '') + ' class="w-4 h-4">' +
+        'Enabled for matching</label></div>';
+    }).join('');
+  }
+
+  function saveUpiSettings() {
+    var boxes = document.querySelectorAll('#upi-settings [data-upi-index]');
+    var upiIds = [];
+    boxes.forEach(function (box) {
+      var i = parseInt(box.getAttribute('data-upi-index'), 10);
+      var base = state.settings.config.upiIds[i];
+      upiIds.push({ id: base.id, label: base.label, enabled: box.checked });
+    });
+    run('updateSettings', [{ upiIds: upiIds }], function (res) {
+      toast('UPI settings saved.', 'ok');
+      state.settings.config.upiIds = res.config.upiIds;
+      renderUpiChips(res.config.upiIds);
+      state.dash = null;
+      loadDashboard();
+    });
+  }
+
+  function renderSources(sync) {
+    var list = $('source-list');
+    if (!sync.sources || !sync.sources.length) {
+      list.innerHTML = '<div class="text-sm text-slate-500 dark:text-slate-400 py-2">No authorized source connected. ' +
+        'The app reports synchronization honestly instead of pretending to have bank access.</div>';
+      return;
+    }
+    list.innerHTML = sync.sources.map(function (s, i) {
+      return '<div class="flex items-center gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-700">' +
+        '<div class="flex-1"><div class="font-medium">' + esc(s.name) + '</div>' +
+        '<div class="text-xs text-slate-500">' + esc(s.url) + ' · ' + esc(s.method) + '</div></div>' +
+        '<span class="badge ' + (s.enabled ? 'badge-green' : 'badge-gray') + '">' + (s.enabled ? 'Enabled' : 'Disabled') + '</span>' +
+        '<button class="text-xs underline text-expense" data-remove-source="' + i + '">Remove</button>' +
+        '</div>';
+    }).join('');
+    list.querySelectorAll('[data-remove-source]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (!window.confirm('Remove this source and its stored token?')) return;
+        run('removeSyncSource', [parseInt(btn.getAttribute('data-remove-source'), 10)], function () {
+          toast('Source removed.', 'ok');
+          loadSettings(true);
+        });
+      });
+    });
+  }
+
+  function renderSyncDetail(res) {
+    $('sync-detail').innerHTML = (res.sync.lastMessage ? esc(res.sync.lastMessage) + '<br>' : '') +
+      (res.spreadsheetUrl ? 'Spreadsheet: <a class="underline text-info" target="_blank" href="' + esc(res.spreadsheetUrl) + '">Open UPI Payment History Dashboard</a>' : '');
+  }
+
+  function addSource() {
+    var name = $('src-name').value.trim();
+    var url = $('src-url').value.trim();
+    var token = $('src-token').value;
+    if (!/^https:\/\//i.test(url)) { toast('Source URL must start with https://', 'err'); return; }
+    run('addSyncSource', [{ name: name || 'Source', url: url, token: token, method: 'GET', enabled: true }], function () {
+      toast('Source added. Tokens are stored server-side only.', 'ok');
+      $('src-name').value = ''; $('src-url').value = ''; $('src-token').value = '';
+      loadSettings(true);
+    });
+  }
+
+  function loadAudit() {
+    run('getAuditLog', [100], function (res) {
+      $('audit-body').innerHTML = res.rows.map(function (r) {
+        return '<tr><td class="text-xs">' + esc(r.timestamp) + '</td><td class="text-xs">' + esc(r.user || '—') +
+          '</td><td class="text-xs"><span class="badge badge-blue">' + esc(r.action) + '</span></td>' +
+          '<td class="text-xs">' + esc(r.details) + '</td></tr>';
+      }).join('') || '<tr><td colspan="4" class="text-center py-6 text-slate-400">No audit entries yet.</td></tr>';
+    });
+  }
+
+})();
+</script>
+
+</body>
+</html>

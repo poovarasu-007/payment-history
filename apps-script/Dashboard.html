@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UPI Payment History Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            income: '#16a34a',
+            expense: '#dc2626',
+            info: '#2563eb'
+          }
+        }
+      }
+    };
+  </script>
+  <script src="https://www.gstatic.com/charts/loader.js"></script>
+  <?!= include('Style'); ?>
+</head>
+<body class="bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-100">
+<div id="app" class="min-h-screen">
+
+  <!-- ============================ Sidebar ============================ -->
+  <aside id="sidebar"
+         class="fixed inset-y-0 left-0 z-40 w-64 bg-slate-900 text-slate-200 transform -translate-x-full lg:translate-x-0 transition-transform duration-200 flex flex-col">
+    <div class="px-5 py-5 border-b border-slate-700">
+      <div class="text-lg font-semibold tracking-tight">UPI Payment History</div>
+      <div class="text-xs text-slate-400 mt-1">Dashboard &amp; Analytics</div>
+    </div>
+    <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+      <button data-nav="dashboard" class="nav-btn">📊 <span>Dashboard</span></button>
+      <button data-nav="transactions" class="nav-btn">🧾 <span>All Transactions</span></button>
+      <button data-nav="daily" class="nav-btn">📅 <span>Daily History</span></button>
+      <button data-nav="overall" class="nav-btn">📈 <span>Overall History</span></button>
+      <button data-nav="import" class="nav-btn">⬇️ <span>Import Statements</span></button>
+      <button data-nav="reports" class="nav-btn">📑 <span>Reports</span></button>
+      <button data-nav="settings" class="nav-btn">⚙️ <span>Settings</span></button>
+    </nav>
+    <div class="px-5 py-4 border-t border-slate-700 text-[11px] text-slate-400 leading-relaxed">
+      <div class="font-semibold text-slate-300 mb-1">🔒 Security</div>
+      This app never asks for a UPI PIN, OTP or banking password. UPI IDs are used only to
+      match transactions from imported statements.
+    </div>
+  </aside>
+  <div id="sidebar-backdrop" class="fixed inset-0 bg-black/40 z-30 hidden lg:hidden"></div>
+
+  <!-- ============================= Main ============================== -->
+  <div class="lg:pl-64">
+    <header class="sticky top-0 z-20 bg-white/90 dark:bg-slate-800/90 backdrop-blur border-b border-slate-200 dark:border-slate-700">
+      <div class="px-4 sm:px-6 py-3 flex flex-wrap items-center gap-3">
+        <button id="menu-toggle" class="lg:hidden text-2xl leading-none px-2">☰</button>
+        <h1 id="view-title" class="text-lg font-semibold mr-auto">Dashboard</h1>
+
+        <div id="upi-chips" class="hidden md:flex items-center gap-2"></div>
+
+        <div id="sync-pill" class="flex items-center gap-2 text-xs px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-600">
+          <span id="sync-dot" class="w-2 h-2 rounded-full bg-slate-400"></span>
+          <span id="sync-text">Checking…</span>
+        </div>
+
+        <button id="dark-toggle" title="Toggle dark mode" class="px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-sm">🌙</button>
+      </div>
+
+      <!-- Range selector -->
+      <div class="px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-2">
+        <span class="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400 mr-1">Period</span>
+        <div id="range-pills" class="flex flex-wrap gap-1.5"></div>
+        <div id="last-sync" class="ml-auto text-[11px] text-slate-500 dark:text-slate-400"></div>
+      </div>
+    </header>
+
+    <main class="px-4 sm:px-6 py-6 space-y-6">
+
+      <!-- ======================= Dashboard view ======================= -->
+      <section id="view-dashboard" class="view space-y-6">
+        <div id="demo-note" class="hidden text-sm rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-900/30 dark:border-amber-700 px-4 py-3">
+          No transactions yet. Import a bank statement (CSV/Excel) or add one manually to see your charts.
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div class="card stat-card">
+            <div class="stat-label">Total Received</div>
+            <div id="card-received" class="stat-value text-income">₹0.00</div>
+            <div id="card-received-sub" class="stat-sub">0 incoming payments</div>
+          </div>
+          <div class="card stat-card">
+            <div class="stat-label">Total Sent</div>
+            <div id="card-sent" class="stat-value text-expense">₹0.00</div>
+            <div id="card-sent-sub" class="stat-sub">0 outgoing payments</div>
+          </div>
+          <div class="card stat-card">
+            <div class="stat-label">Net Payment Flow</div>
+            <div id="card-net" class="stat-value text-info">₹0.00</div>
+            <div id="card-net-sub" class="stat-sub">Received − Sent</div>
+          </div>
+          <div class="card stat-card">
+            <div class="stat-label">Successful Transactions</div>
+            <div id="card-count" class="stat-value">0</div>
+            <div id="card-count-sub" class="stat-sub">of 0 total in period</div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div class="card">
+            <h2 class="card-title">Money Received vs Money Sent</h2>
+            <div id="chart-received-sent" class="chart-box"></div>
+          </div>
+          <div class="card">
+            <div class="flex items-center justify-between mb-2">
+              <h2 class="card-title mb-0">Payment Distribution by UPI ID</h2>
+              <div class="seg" data-seg="upi">
+                <button data-val="incoming" class="seg-btn is-active">Incoming</button>
+                <button data-val="outgoing" class="seg-btn">Outgoing</button>
+              </div>
+            </div>
+            <div id="chart-upi" class="chart-box"></div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div class="card">
+            <h2 class="card-title">Payment Categories (money sent)</h2>
+            <div id="chart-categories" class="chart-box"></div>
+          </div>
+          <div class="card">
+            <div class="flex items-center justify-between mb-2">
+              <h2 class="card-title mb-0">Daily Payment Distribution</h2>
+              <div class="seg" data-seg="dailydist">
+                <button data-val="received" class="seg-btn is-active">Received</button>
+                <button data-val="sent" class="seg-btn">Sent</button>
+              </div>
+            </div>
+            <div id="chart-daily-dist" class="chart-box"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">Daily Income vs Expense</h2>
+          <div id="chart-daily-bar" class="chart-box chart-tall"></div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div class="card">
+            <h2 class="card-title">Monthly Income vs Expense</h2>
+            <div id="chart-monthly" class="chart-box"></div>
+          </div>
+          <div class="card">
+            <h2 class="card-title">Yearly Financial Overview</h2>
+            <div id="chart-yearly" class="chart-box"></div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div class="card">
+            <h2 class="card-title">Transaction Count by Status</h2>
+            <div id="chart-status" class="chart-box"></div>
+          </div>
+          <div class="card">
+            <h2 class="card-title">Running Net Payment Flow</h2>
+            <div id="chart-running" class="chart-box"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ====================== Transactions view ===================== -->
+      <section id="view-transactions" class="view hidden space-y-4">
+        <div class="card">
+          <div class="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3">
+            <div class="md:col-span-2">
+              <label class="field-label">Search</label>
+              <input id="f-search" type="text" class="field" placeholder="Payee, UTR, notes…">
+            </div>
+            <div>
+              <label class="field-label">UPI ID</label>
+              <select id="f-upi" class="field"></select>
+            </div>
+            <div>
+              <label class="field-label">Type</label>
+              <select id="f-type" class="field">
+                <option value="">All</option>
+                <option>Money Received</option>
+                <option>Money Sent</option>
+                <option>Unknown</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Status</label>
+              <select id="f-status" class="field">
+                <option value="">All</option>
+                <option>Successful</option>
+                <option>Pending</option>
+                <option>Failed</option>
+                <option>Reversed</option>
+                <option>Unknown</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Category</label>
+              <select id="f-category" class="field"></select>
+            </div>
+            <div>
+              <label class="field-label">From</label>
+              <input id="f-from" type="date" class="field">
+            </div>
+            <div>
+              <label class="field-label">To</label>
+              <input id="f-to" type="date" class="field">
+            </div>
+            <div class="flex items-end gap-2 md:col-span-2">
+              <button id="f-apply" class="btn btn-primary">Apply filters</button>
+              <button id="f-clear" class="btn btn-ghost">Clear</button>
+              <button id="f-export" class="btn btn-ghost">⬇ CSV</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card overflow-hidden p-0">
+          <div class="overflow-x-auto">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th data-sort="date">Date ⇅</th>
+                  <th data-sort="time">Time ⇅</th>
+                  <th data-sort="counterparty">Payer / Payee ⇅</th>
+                  <th data-sort="upiId">UPI ID ⇅</th>
+                  <th data-sort="type">Type ⇅</th>
+                  <th data-sort="category">Category ⇅</th>
+                  <th data-sort="amount" class="text-right">Amount ⇅</th>
+                  <th data-sort="status">Status ⇅</th>
+                  <th>Reference</th>
+                  <th>Source</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="txn-body"></tbody>
+            </table>
+          </div>
+          <div class="flex flex-wrap items-center gap-3 px-4 py-3 border-t border-slate-200 dark:border-slate-700">
+            <div id="txn-meta" class="text-sm text-slate-500 dark:text-slate-400"></div>
+            <div class="ml-auto flex items-center gap-2">
+              <button id="page-prev" class="btn btn-ghost">← Prev</button>
+              <span id="page-info" class="text-sm"></span>
+              <button id="page-next" class="btn btn-ghost">Next →</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================= Daily view ========================= -->
+      <section id="view-daily" class="view hidden space-y-4">
+        <div class="card flex flex-wrap items-end gap-3">
+          <div>
+            <label class="field-label">Jump to a date</label>
+            <input id="daily-date" type="date" class="field">
+          </div>
+          <button id="daily-all" class="btn btn-ghost">Show all days</button>
+          <div class="ml-auto text-xs text-slate-500 dark:text-slate-400">Daily totals are calculated from the ledger — failed, pending and reversed rows are handled per the rules below each table.</div>
+        </div>
+        <div class="card overflow-hidden p-0">
+          <div class="overflow-x-auto">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th class="text-right">Received</th>
+                  <th class="text-right">Sent</th>
+                  <th class="text-right">Refunds</th>
+                  <th class="text-right">Net Flow</th>
+                  <th class="text-right">Incoming</th>
+                  <th class="text-right">Outgoing</th>
+                  <th class="text-right">Total Txns</th>
+                </tr>
+              </thead>
+              <tbody id="daily-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <p class="text-xs text-slate-500 dark:text-slate-400">
+          Received/Sent include only <strong>Successful</strong> transactions. Refunds &amp; reversals are shown separately and excluded from Received/Sent to avoid double counting.
+          Net Payment Flow = Total Money Received − Total Money Sent.
+        </p>
+      </section>
+
+      <!-- ======================== Overall view ======================== -->
+      <section id="view-overall" class="view hidden space-y-6">
+        <div id="overall-cards" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4"></div>
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div class="card overflow-hidden p-0">
+            <h2 class="card-title px-4 pt-4">Monthly Totals</h2>
+            <div class="overflow-x-auto">
+              <table class="data-table">
+                <thead><tr><th>Month</th><th class="text-right">Received</th><th class="text-right">Sent</th><th class="text-right">Net</th><th class="text-right">Txns</th></tr></thead>
+                <tbody id="overall-monthly"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card overflow-hidden p-0">
+            <h2 class="card-title px-4 pt-4">Yearly Totals</h2>
+            <div class="overflow-x-auto">
+              <table class="data-table">
+                <thead><tr><th>Year</th><th class="text-right">Received</th><th class="text-right">Sent</th><th class="text-right">Net</th><th class="text-right">Txns</th></tr></thead>
+                <tbody id="overall-yearly"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="card overflow-hidden p-0">
+          <h2 class="card-title px-4 pt-4">Transactions by Registered UPI ID</h2>
+          <div class="overflow-x-auto">
+            <table class="data-table">
+              <thead><tr><th>UPI ID</th><th>Enabled</th><th class="text-right">Incoming</th><th class="text-right">Incoming Total</th><th class="text-right">Outgoing</th><th class="text-right">Outgoing Total</th></tr></thead>
+              <tbody id="overall-upi"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================= Import view ======================== -->
+      <section id="view-import" class="view hidden space-y-6">
+        <div class="card">
+          <h2 class="card-title">Import bank statement (CSV / Excel-exported / pasted data)</h2>
+          <p class="text-sm text-slate-500 dark:text-slate-400 mb-3">
+            A UPI ID alone cannot read your bank history. Export a statement (CSV) from your bank or UPI app,
+            or paste spreadsheet rows below. The importer auto-detects columns, matches your configured UPI IDs,
+            removes duplicates by UTR/reference and stores everything in <strong>All Transactions</strong>.
+          </p>
+          <div id="dropzone" class="dropzone">
+            <div class="text-3xl mb-1">📄</div>
+            <div class="font-medium">Drag &amp; drop a CSV file here</div>
+            <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">or <label class="underline cursor-pointer">browse<input id="file-input" type="file" accept=".csv,.txt,text/csv,text/plain" class="hidden"></label> · also accepts tab-separated data copied from Excel</div>
+          </div>
+          <div class="mt-4">
+            <label class="field-label">…or paste rows (including the header row)</label>
+            <textarea id="paste-data" rows="6" class="field font-mono text-xs" placeholder="Transaction Date,Amount (₹),Type,Status,Name,UTR&#10;11/10/2026,₹500.00,Debit,Success,Swiggy,UTR123"></textarea>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <button id="paste-import" class="btn btn-primary">Import pasted rows</button>
+              <span class="text-xs text-slate-500 dark:text-slate-400 self-center">Duplicates are skipped automatically.</span>
+            </div>
+          </div>
+          <div id="import-result" class="mt-4 hidden"></div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">Manual transaction entry</h2>
+          <p class="text-sm text-slate-500 dark:text-slate-400 mb-3">
+            Use this only for corrections or sources you cannot export. Every manual entry is labelled
+            <em>Manual Entry</em> and recorded in the audit log.
+          </p>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div><label class="field-label">Date *</label><input id="m-date" type="date" class="field"></div>
+            <div><label class="field-label">Time</label><input id="m-time" type="time" class="field"></div>
+            <div><label class="field-label">Type *</label>
+              <select id="m-type" class="field">
+                <option>Money Received</option>
+                <option>Money Sent</option>
+              </select>
+            </div>
+            <div><label class="field-label">Amount (₹) *</label><input id="m-amount" type="number" step="0.01" min="0" class="field" placeholder="0.00"></div>
+            <div><label class="field-label">Status</label>
+              <select id="m-status" class="field">
+                <option>Successful</option>
+                <option>Pending</option>
+                <option>Failed</option>
+                <option>Reversed</option>
+              </select>
+            </div>
+            <div><label class="field-label">Category</label><select id="m-category" class="field"></select></div>
+            <div><label class="field-label">Payer / Payee name</label><input id="m-party" type="text" class="field"></div>
+            <div><label class="field-label">Payer / Payee UPI ID</label><input id="m-party-upi" type="text" class="field" placeholder="name@bank"></div>
+            <div><label class="field-label">Your UPI ID</label><select id="m-upi" class="field"></select></div>
+            <div><label class="field-label">UTR / Reference</label><input id="m-utr" type="text" class="field"></div>
+            <div><label class="field-label">Payment method</label><input id="m-method" type="text" class="field" placeholder="UPI"></div>
+            <div><label class="field-label">Notes</label><input id="m-notes" type="text" class="field"></div>
+          </div>
+          <div class="mt-3 flex items-center gap-3">
+            <button id="manual-save" class="btn btn-primary">Save transaction</button>
+            <span id="manual-msg" class="text-sm"></span>
+          </div>
+          <p class="mt-3 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 rounded-lg px-3 py-2">
+            🔒 Never enter a UPI PIN, OTP or banking password anywhere in this app. It will never be requested.
+          </p>
+        </div>
+      </section>
+
+      <!-- ======================== Reports view ======================== -->
+      <section id="view-reports" class="view hidden space-y-6">
+        <div class="card">
+          <h2 class="card-title">Export &amp; reports</h2>
+          <div class="flex flex-wrap gap-2">
+            <button class="btn btn-primary" data-export="transactions">⬇ Transactions (CSV)</button>
+            <button class="btn btn-ghost" data-export="daily">⬇ Daily report (CSV)</button>
+            <button class="btn btn-ghost" data-export="monthly">⬇ Monthly report (CSV)</button>
+            <button class="btn btn-ghost" data-export="reconciliation">⬇ Reconciliation (CSV)</button>
+            <button class="btn btn-ghost" data-export="print">🖨 Printable report</button>
+          </div>
+          <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">
+            CSV files open directly in Excel / Google Sheets. Transaction exports respect the filters set on the
+            All Transactions tab. Printable reports open your browser's print dialog.
+          </p>
+        </div>
+
+        <div class="card overflow-hidden p-0">
+          <div class="flex items-center gap-3 px-4 pt-4">
+            <h2 class="card-title mb-0">Reconciliation report</h2>
+            <button id="recon-refresh" class="btn btn-ghost ml-auto">↻ Refresh</button>
+          </div>
+          <p class="text-xs text-slate-500 dark:text-slate-400 px-4 mt-1">
+            Flags missing references, duplicate candidates, refunds/reversals, amount mismatches and unknown directions.
+            Nothing here is changed automatically.
+          </p>
+          <div class="overflow-x-auto mt-3">
+            <table class="data-table">
+              <thead><tr><th>Type</th><th>Date</th><th class="text-right">Amount</th><th>Counterparty</th><th>Details</th></tr></thead>
+              <tbody id="recon-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ======================== Settings view ======================= -->
+      <section id="view-settings" class="view hidden space-y-6">
+        <div class="card">
+          <h2 class="card-title">Registered UPI IDs</h2>
+          <p class="text-sm text-slate-500 dark:text-slate-400 mb-3">
+            Enable or disable each ID for transaction matching. These are identifiers only — they are not
+            credentials and cannot read bank history by themselves.
+          </p>
+          <div id="upi-settings" class="space-y-3"></div>
+          <button id="upi-save" class="btn btn-primary mt-4">Save UPI settings</button>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">Data source &amp; synchronization</h2>
+          <div class="flex flex-wrap items-center gap-2 mb-3">
+            <button id="sync-now" class="btn btn-ghost">↻ Run sync now</button>
+            <button id="trigger-create" class="btn btn-ghost">⏱ Create 6-hour trigger</button>
+            <button id="trigger-remove" class="btn btn-ghost">⏱ Remove trigger</button>
+            <button id="disconnect" class="btn btn-danger ml-auto">Disconnect all integrations</button>
+          </div>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
+            Optional: connect an <strong>authorized</strong> provider webhook that returns statement rows in the
+            supported CSV format. This app never scrapes protected banking pages and never bypasses UPI/bank security.
+            Tokens are stored server-side in Script Properties and are never sent to the browser.
+          </p>
+          <div id="source-list" class="space-y-3"></div>
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mt-3">
+            <input id="src-name" class="field" placeholder="Source name">
+            <input id="src-url" class="field md:col-span-2" placeholder="https://provider.example/api/transactions">
+            <input id="src-token" class="field" type="password" placeholder="Bearer token (optional)">
+          </div>
+          <button id="src-add" class="btn btn-ghost mt-3">Add source</button>
+          <div id="sync-detail" class="mt-3 text-xs text-slate-500 dark:text-slate-400"></div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">Audit log</h2>
+          <div class="overflow-x-auto max-h-96 overflow-y-auto">
+            <table class="data-table">
+              <thead><tr><th>Timestamp (IST)</th><th>User</th><th>Action</th><th>Details</th></tr></thead>
+              <tbody id="audit-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card border-expense/40">
+          <h2 class="card-title text-expense">Danger zone</h2>
+          <p class="text-sm text-slate-500 dark:text-slate-400 mb-3">
+            Permanently clear every transaction from the ledger and rebuild the summary sheets. This cannot be undone.
+          </p>
+          <div class="flex flex-wrap items-center gap-2">
+            <input id="reset-confirm" class="field max-w-xs" placeholder="Type RESET to confirm">
+            <button id="reset-btn" class="btn btn-danger">Reset dashboard data</button>
+          </div>
+        </div>
+      </section>
+
+      <footer class="pt-2 pb-8 text-center text-[11px] text-slate-400">
+        UPI Payment History Dashboard · UPI IDs are used only to match imported transactions ·
+        No PIN / OTP / passwords are ever stored.
+      </footer>
+    </main>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="fixed bottom-5 right-5 z-50 hidden max-w-sm px-4 py-3 rounded-xl shadow-lg text-sm"></div>
+
+<!-- Hidden printable report -->
+<div id="print-area" class="print-only"></div>
+
+<?!= include('Client'); ?>
+</body>
+</html>
